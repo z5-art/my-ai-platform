@@ -1,9 +1,20 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from "react";
 
+// ─── Config from deploy guide ─────────────────────────────────────────────────
+const APP_URL = "https://my-ai-platform.vercel.app";
+const SUPABASE_URL = "https://uiehcsmidizvmebkypgg.supabase.co";
+
+// ─── Plan config (matches types/index.ts in deploy guide) ────────────────────
+const PLAN_CONFIG = {
+  free:  { credits: 50,   price_mad: 0,   price_label: "0 درهم" },
+  pro:   { credits: 500,  price_mad: 99,  price_label: "99 درهم" },
+  ultra: { credits: 2000, price_mad: 299, price_label: "299 درهم" },
+};
+
 // ─── Translations ─────────────────────────────────────────────────────────────
 const TRANSLATIONS = {
-  ar: { 
+  ar: {
     dir: "rtl",
     name: "إبداع AI",
     tagline: "منصة الذكاء الاصطناعي لإبداع بلا حدود",
@@ -45,9 +56,9 @@ const TRANSLATIONS = {
       title: "اختر خطتك",
       subtitle: "ابدأ مجاناً، طور حسب احتياجك",
       plans: [
-        { id: "free", name: "المجاني", price: "0", currency: "درهم/شهر", credits: 50, features: ["50 رصيد شهرياً", "توليد صور عادية", "محادثة مفتوحة", "معرض 10 أعمال"], cta: "ابدأ مجاناً", popular: false },
-        { id: "pro", name: "الاحترافي", price: "99", currency: "درهم/شهر", credits: 500, features: ["500 رصيد شهرياً", "توليد صور عالية الجودة", "توليد فيديو قصير", "محادثة غير محدودة", "معرض 100 عمل", "أولوية المعالجة"], cta: "اشترك الآن", popular: true },
-        { id: "ultra", name: "الأعمال", price: "299", currency: "درهم/شهر", credits: 2000, features: ["2000 رصيد شهرياً", "جميع الميزات", "فيديو 4K", "API مخصص", "دعم أولوي 24/7", "معرض غير محدود"], cta: "تواصل معنا", popular: false },
+        { id: "free",  name: "المجاني",    price: "0",   currency: "درهم/شهر", credits: 50,   features: ["50 رصيد شهرياً", "توليد صور عادية", "محادثة مفتوحة", "معرض 10 أعمال"],                                                                   cta: "ابدأ مجاناً",   popular: false },
+        { id: "pro",   name: "الاحترافي", price: "99",  currency: "درهم/شهر", credits: 500,  features: ["500 رصيد شهرياً", "توليد صور عالية الجودة", "توليد فيديو قصير", "محادثة غير محدودة", "معرض 100 عمل", "أولوية المعالجة"], cta: "اشترك الآن",   popular: true },
+        { id: "ultra", name: "الأعمال",   price: "299", currency: "درهم/شهر", credits: 2000, features: ["2000 رصيد شهرياً", "جميع الميزات", "فيديو 4K", "API مخصص", "دعم أولوي 24/7", "معرض غير محدود"],                                cta: "تواصل معنا",  popular: false },
       ],
     },
     credits: "الرصيد",
@@ -63,6 +74,37 @@ const TRANSLATIONS = {
     hasAccount: "لديك حساب؟",
     demoLogin: "دخول تجريبي",
     toast: { copied: "تم النسخ!", generated: "تم التوليد بنجاح!", error: "حدث خطأ، حاول مجدداً", noCredits: "رصيدك غير كافٍ! يرجى الترقية" },
+    // ── Payment page strings ──
+    pay: {
+      title: "إتمام الدفع",
+      subtitle: "أنت على بُعد خطوة واحدة من الإبداع اللامحدود",
+      orderSummary: "ملخص الطلب",
+      plan: "الخطة",
+      credits: "الرصيد",
+      total: "المجموع",
+      currency: "درهم مغربي",
+      secureBadge: "دفع آمن ومشفر بـ YouCan Pay",
+      cardNumber: "رقم البطاقة",
+      expiry: "تاريخ الانتهاء",
+      cvv: "رمز CVV",
+      cardHolder: "اسم حامل البطاقة",
+      payNow: "ادفع الآن",
+      processing: "جاري المعالجة...",
+      back: "رجوع",
+      orPay: "أو ادفع عبر",
+      success: "تم الدفع بنجاح! تم إضافة رصيدك.",
+      failed: "فشل الدفع. يرجى المحاولة مجدداً.",
+      redirect: "سيتم تحويلك لبوابة YouCan Pay...",
+      monthYear: "شهر / سنة",
+      testCard: "بطاقة تجريبية: 4242 4242 4242 4242",
+      youcanTitle: "الدفع عبر بوابة YouCan Pay",
+      youcanDesc: "سيتم تحويلك إلى بوابة الدفع الآمنة لإتمام المعاملة",
+      youcanBtn: "الانتقال إلى YouCan Pay",
+      backToPricing: "العودة للأسعار",
+      guarantee: "ضمان استرداد المال خلال 7 أيام",
+      support: "دعم 24/7",
+      ssl: "تشفير SSL",
+    },
   },
   fr: {
     dir: "ltr",
@@ -106,9 +148,9 @@ const TRANSLATIONS = {
       title: "Choisissez votre plan",
       subtitle: "Commencez gratuitement, évoluez selon vos besoins",
       plans: [
-        { id: "free", name: "Gratuit", price: "0", currency: "MAD/mois", credits: 50, features: ["50 crédits/mois", "Génération d'images standard", "Chat illimité", "Galerie 10 créations"], cta: "Commencer gratuitement", popular: false },
-        { id: "pro", name: "Pro", price: "9.99", currency: "€/mois", credits: 500, features: ["500 crédits/mois", "Images haute qualité", "Génération vidéo courte", "Chat illimité", "Galerie 100 créations", "Traitement prioritaire"], cta: "S'abonner", popular: true },
-        { id: "ultra", name: "Business", price: "29.99", currency: "€/mois", credits: 2000, features: ["2000 crédits/mois", "Toutes les fonctionnalités", "Vidéo 4K", "API dédiée", "Support prioritaire 24/7", "Galerie illimitée"], cta: "Nous contacter", popular: false },
+        { id: "free",  name: "Gratuit",  price: "0",   currency: "MAD/mois", credits: 50,   features: ["50 crédits/mois", "Génération d'images standard", "Chat illimité", "Galerie 10 créations"],                                                    cta: "Commencer gratuitement", popular: false },
+        { id: "pro",   name: "Pro",      price: "99",  currency: "MAD/mois", credits: 500,  features: ["500 crédits/mois", "Images haute qualité", "Génération vidéo courte", "Chat illimité", "Galerie 100 créations", "Traitement prioritaire"], cta: "S'abonner",              popular: true },
+        { id: "ultra", name: "Business", price: "299", currency: "MAD/mois", credits: 2000, features: ["2000 crédits/mois", "Toutes les fonctionnalités", "Vidéo 4K", "API dédiée", "Support prioritaire 24/7", "Galerie illimitée"],            cta: "Nous contacter",         popular: false },
       ],
     },
     credits: "Crédits",
@@ -124,6 +166,36 @@ const TRANSLATIONS = {
     hasAccount: "Déjà un compte?",
     demoLogin: "Connexion démo",
     toast: { copied: "Copié!", generated: "Généré avec succès!", error: "Erreur, réessayez", noCredits: "Crédits insuffisants! Passez à un plan supérieur" },
+    pay: {
+      title: "Finaliser le paiement",
+      subtitle: "Vous êtes à un pas d'une créativité illimitée",
+      orderSummary: "Récapitulatif",
+      plan: "Plan",
+      credits: "Crédits",
+      total: "Total",
+      currency: "MAD",
+      secureBadge: "Paiement sécurisé via YouCan Pay",
+      cardNumber: "Numéro de carte",
+      expiry: "Date d'expiration",
+      cvv: "Code CVV",
+      cardHolder: "Nom du titulaire",
+      payNow: "Payer maintenant",
+      processing: "Traitement en cours...",
+      back: "Retour",
+      orPay: "Ou payer via",
+      success: "Paiement réussi! Vos crédits ont été ajoutés.",
+      failed: "Paiement échoué. Veuillez réessayer.",
+      redirect: "Redirection vers YouCan Pay...",
+      monthYear: "MM / AA",
+      testCard: "Carte test: 4242 4242 4242 4242",
+      youcanTitle: "Paiement via YouCan Pay",
+      youcanDesc: "Vous serez redirigé vers la passerelle de paiement sécurisée",
+      youcanBtn: "Aller vers YouCan Pay",
+      backToPricing: "Retour aux tarifs",
+      guarantee: "Remboursement garanti 7 jours",
+      support: "Support 24/7",
+      ssl: "Cryptage SSL",
+    },
   },
   en: {
     dir: "ltr",
@@ -167,9 +239,9 @@ const TRANSLATIONS = {
       title: "Choose Your Plan",
       subtitle: "Start free, scale as you grow",
       plans: [
-        { id: "free", name: "Free", price: "0", currency: "$/month", credits: 50, features: ["50 credits/month", "Standard image generation", "Unlimited chat", "Gallery 10 creations"], cta: "Get Started Free", popular: false },
-        { id: "pro", name: "Pro", price: "9.99", currency: "$/month", credits: 500, features: ["500 credits/month", "HD image generation", "Short video generation", "Unlimited chat", "Gallery 100 creations", "Priority processing"], cta: "Subscribe Now", popular: true },
-        { id: "ultra", name: "Business", price: "29.99", currency: "$/month", credits: 2000, features: ["2000 credits/month", "All features", "4K video", "Dedicated API", "24/7 priority support", "Unlimited gallery"], cta: "Contact Us", popular: false },
+        { id: "free",  name: "Free",     price: "0",   currency: "MAD/mo", credits: 50,   features: ["50 credits/month", "Standard image generation", "Unlimited chat", "Gallery 10 creations"],                                                     cta: "Get Started Free", popular: false },
+        { id: "pro",   name: "Pro",      price: "99",  currency: "MAD/mo", credits: 500,  features: ["500 credits/month", "HD image generation", "Short video generation", "Unlimited chat", "Gallery 100 creations", "Priority processing"], cta: "Subscribe Now",    popular: true },
+        { id: "ultra", name: "Business", price: "299", currency: "MAD/mo", credits: 2000, features: ["2000 credits/month", "All features", "4K video", "Dedicated API", "24/7 priority support", "Unlimited gallery"],                       cta: "Contact Us",       popular: false },
       ],
     },
     credits: "Credits",
@@ -185,10 +257,40 @@ const TRANSLATIONS = {
     hasAccount: "Have an account?",
     demoLogin: "Demo Login",
     toast: { copied: "Copied!", generated: "Generated successfully!", error: "Error, please try again", noCredits: "Insufficient credits! Please upgrade" },
+    pay: {
+      title: "Complete Payment",
+      subtitle: "You're one step away from unlimited creativity",
+      orderSummary: "Order Summary",
+      plan: "Plan",
+      credits: "Credits",
+      total: "Total",
+      currency: "MAD",
+      secureBadge: "Secure payment via YouCan Pay",
+      cardNumber: "Card Number",
+      expiry: "Expiry Date",
+      cvv: "CVV Code",
+      cardHolder: "Cardholder Name",
+      payNow: "Pay Now",
+      processing: "Processing...",
+      back: "Back",
+      orPay: "Or pay via",
+      success: "Payment successful! Your credits have been added.",
+      failed: "Payment failed. Please try again.",
+      redirect: "Redirecting to YouCan Pay...",
+      monthYear: "MM / YY",
+      testCard: "Test card: 4242 4242 4242 4242",
+      youcanTitle: "Pay via YouCan Pay",
+      youcanDesc: "You will be redirected to the secure payment gateway to complete your transaction",
+      youcanBtn: "Go to YouCan Pay",
+      backToPricing: "Back to Pricing",
+      guarantee: "7-day money-back guarantee",
+      support: "24/7 Support",
+      ssl: "SSL Encrypted",
+    },
   },
 };
 
-// ─── Demo image placeholders (SVG-based) ──────────────────────────────────────
+// ─── Demo image placeholders ──────────────────────────────────────────────────
 const DEMO_IMAGES = [
   "https://picsum.photos/seed/ai1/400/300",
   "https://picsum.photos/seed/ai2/400/300",
@@ -216,6 +318,14 @@ export default function App() {
   const [videoLoading, setVideoLoading] = useState(false);
   const [generatedVideo, setGeneratedVideo] = useState(null);
   const [loginMode, setLoginMode] = useState("login");
+  // ── Payment state ──
+  const [selectedPlan, setSelectedPlan] = useState(null);
+  const [payTab, setPayTab] = useState("card"); // "card" | "youcan"
+  const [payLoading, setPayLoading] = useState(false);
+  const [cardNum, setCardNum] = useState("");
+  const [cardExp, setCardExp] = useState("");
+  const [cardCvv, setCardCvv] = useState("");
+  const [cardName, setCardName] = useState("");
   const chatEndRef = useRef(null);
 
   const t = TRANSLATIONS[lang];
@@ -232,7 +342,7 @@ export default function App() {
 
   const showToast = useCallback((msg, type = "success") => {
     setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), 3500);
   }, []);
 
   const handleDemoLogin = () => {
@@ -242,6 +352,53 @@ export default function App() {
   };
 
   const handleLogout = () => { setUser(null); setPage("home"); };
+
+  // ── Open payment page ──────────────────────────────────────────────────────
+  const openPayment = (plan) => {
+    if (!user) { setPage("login"); return; }
+    if (plan.id === "free") { showToast(lang === "ar" ? "أنت على الخطة المجانية" : lang === "fr" ? "Vous êtes sur le plan gratuit" : "You're on the free plan"); return; }
+    if (plan.id === "ultra") { showToast(lang === "ar" ? "تواصل معنا عبر البريد" : lang === "fr" ? "Contactez-nous par email" : "Contact us via email"); return; }
+    setSelectedPlan(plan);
+    setPayTab("card");
+    setCardNum(""); setCardExp(""); setCardCvv(""); setCardName("");
+    setPage("payment");
+  };
+
+  // ── Simulate card payment → calls /api/youcanpay/checkout ─────────────────
+  const handleCardPay = async () => {
+    if (!cardNum || !cardExp || !cardCvv || !cardName) {
+      showToast(lang === "ar" ? "يرجى ملء جميع الحقول" : lang === "fr" ? "Veuillez remplir tous les champs" : "Please fill all fields", "error");
+      return;
+    }
+    setPayLoading(true);
+    // In production this POSTs to /api/youcanpay/checkout → returns checkout URL
+    // Here we simulate a 2s round-trip then success
+    await new Promise(r => setTimeout(r, 2000));
+    const cfg = PLAN_CONFIG[selectedPlan.id];
+    setCredits(c => c + cfg.credits);
+    showToast(t.pay.success);
+    setPayLoading(false);
+    setPage("pricing");
+  };
+
+  // ── Redirect to YouCan Pay hosted checkout ─────────────────────────────────
+  const handleYouCanRedirect = async () => {
+    setPayLoading(true);
+    showToast(t.pay.redirect);
+    // In production: POST /api/youcanpay/checkout → { checkout_url }
+    // Then: window.location.href = checkout_url
+    // Webhook at /api/youcanpay/webhook handles success and updates Supabase
+    await new Promise(r => setTimeout(r, 1500));
+    const checkoutUrl =
+      `${APP_URL}/api/youcanpay/checkout?plan=${selectedPlan.id}&user=${encodeURIComponent(user.email)}`;
+    // window.location.href = checkoutUrl; // Uncomment in production
+    alert(`[DEV] Would redirect to:\n${checkoutUrl}\n\nWebhook at: ${APP_URL}/api/youcanpay/webhook`);
+    setPayLoading(false);
+  };
+
+  // ── Format card number with spaces ────────────────────────────────────────
+  const formatCard = (v) => v.replace(/\D/g, "").slice(0, 16).replace(/(.{4})/g, "$1 ").trim();
+  const formatExp  = (v) => { const d = v.replace(/\D/g, "").slice(0, 4); return d.length > 2 ? d.slice(0,2) + " / " + d.slice(2) : d; };
 
   // ── Chat ──────────────────────────────────────────────────────────────────
   const sendChat = async () => {
@@ -271,7 +428,7 @@ export default function App() {
     setChatLoading(false);
   };
 
-  // ── Image Generation (demo: Picsum + simulated) ───────────────────────────
+  // ── Image Generation ──────────────────────────────────────────────────────
   const generateImage = async () => {
     if (!imagePrompt.trim() || imageLoading) return;
     if (credits < 10) { showToast(t.toast.noCredits, "error"); return; }
@@ -287,7 +444,7 @@ export default function App() {
     setImageLoading(false);
   };
 
-  // ── Video Generation (demo: animated placeholder) ─────────────────────────
+  // ── Video Generation ──────────────────────────────────────────────────────
   const generateVideo = async () => {
     if (!videoPrompt.trim() || videoLoading) return;
     if (credits < 50) { showToast(t.toast.noCredits, "error"); return; }
@@ -474,7 +631,7 @@ export default function App() {
       font-family: var(--font); transition: all 0.2s;
     }
     .style-pill.active { background: rgba(124,92,252,0.2); border-color: var(--accent); color: #a78bfa; }
-    .gen-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 20px; flex-wrap: gap; }
+    .gen-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 20px; }
     .cost-label { font-size: 13px; color: var(--muted); }
     .result-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
     .result-img { width: 100%; display: block; aspect-ratio: 3/2; object-fit: cover; }
@@ -487,7 +644,7 @@ export default function App() {
 
     /* Gallery */
     .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px,1fr)); gap: 16px; }
-    .gallery-item { position: relative; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); group cursor: pointer; }
+    .gallery-item { position: relative; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); cursor: pointer; }
     .gallery-item img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; transition: transform 0.3s; }
     .gallery-item:hover img { transform: scale(1.05); }
     .gallery-overlay { position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.8), transparent); opacity: 0; transition: opacity 0.3s; display: flex; flex-direction: column; justify-content: flex-end; padding: 14px; }
@@ -547,6 +704,163 @@ export default function App() {
     .login-switch { text-align: center; margin-top: 20px; font-size: 13px; color: var(--muted); }
     .login-switch a { color: #a78bfa; cursor: pointer; text-decoration: none; }
 
+    /* ── Payment Page ──────────────────────────────────────────────── */
+    .pay-page {
+      min-height: calc(100vh - 64px);
+      display: flex; align-items: flex-start; justify-content: center;
+      padding: 40px 24px; position: relative; overflow: hidden;
+    }
+    .pay-bg {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background: radial-gradient(ellipse 70% 50% at 30% 30%, rgba(124,92,252,0.08) 0%, transparent 60%),
+                  radial-gradient(ellipse 50% 40% at 80% 80%, rgba(193,88,245,0.06) 0%, transparent 50%);
+    }
+    .pay-layout {
+      position: relative; z-index: 1;
+      display: grid; grid-template-columns: 1fr 380px; gap: 28px;
+      width: 100%; max-width: 900px; align-items: start;
+    }
+    @media (max-width: 720px) { .pay-layout { grid-template-columns: 1fr; } .pay-summary { order: -1; } }
+
+    /* Left: form card */
+    .pay-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 20px; padding: 32px; animation: fadeUp 0.5s ease both;
+    }
+    .pay-header { margin-bottom: 28px; }
+    .pay-back {
+      display: inline-flex; align-items: center; gap: 6px;
+      color: var(--muted); font-size: 13px; cursor: pointer;
+      background: none; border: none; font-family: var(--font);
+      margin-bottom: 20px; transition: color 0.2s; padding: 0;
+    }
+    .pay-back:hover { color: var(--text); }
+    .pay-title { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    .pay-subtitle { font-size: 13px; color: var(--muted); }
+
+    /* Tabs */
+    .pay-tabs {
+      display: flex; gap: 4px; margin-bottom: 28px;
+      background: var(--surface2); border-radius: 12px; padding: 4px;
+    }
+    .pay-tab {
+      flex: 1; padding: 10px; border-radius: 9px; border: none; cursor: pointer;
+      font-family: var(--font); font-size: 13px; font-weight: 600; transition: all 0.2s;
+      background: none; color: var(--muted);
+    }
+    .pay-tab.active { background: var(--surface); color: var(--text); box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+
+    /* Card form */
+    .pay-field { margin-bottom: 18px; }
+    .pay-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .pay-label { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 7px; display: block; text-transform: uppercase; letter-spacing: 0.05em; }
+    .pay-input {
+      width: 100%; padding: 12px 14px;
+      background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+      border-radius: 11px; color: var(--text); font-family: var(--font);
+      font-size: 14px; outline: none; transition: border-color 0.2s;
+      letter-spacing: 0.03em;
+    }
+    .pay-input:focus { border-color: var(--accent); background: rgba(124,92,252,0.04); }
+    .pay-input::placeholder { color: var(--muted); letter-spacing: normal; }
+    .pay-input.card-num { letter-spacing: 0.15em; font-size: 16px; font-weight: 600; }
+
+    /* Card preview */
+    .card-preview {
+      width: 100%; aspect-ratio: 1.586; border-radius: 18px; margin-bottom: 24px;
+      background: linear-gradient(135deg, #1a0a3a 0%, #0d0d1f 40%, #1a0a3a 100%);
+      border: 1px solid rgba(124,92,252,0.25); position: relative; overflow: hidden;
+      padding: 22px 24px; display: flex; flex-direction: column; justify-content: space-between;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08);
+    }
+    .card-preview::before {
+      content: ''; position: absolute; top: -30%; right: -10%; width: 250px; height: 250px;
+      border-radius: 50%; background: radial-gradient(circle, rgba(124,92,252,0.15), transparent 70%);
+    }
+    .card-chip { width: 40px; height: 30px; border-radius: 6px; background: linear-gradient(135deg, #d4a843, #f0c040); }
+    .card-num-display { font-size: 18px; font-weight: 600; letter-spacing: 0.2em; color: rgba(255,255,255,0.9); font-family: 'Courier New', monospace; }
+    .card-bottom { display: flex; justify-content: space-between; align-items: flex-end; }
+    .card-label-sm { font-size: 9px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 3px; }
+    .card-value-sm { font-size: 13px; color: rgba(255,255,255,0.85); font-weight: 600; }
+    .card-brand { font-size: 22px; font-weight: 800; color: rgba(255,255,255,0.6); font-style: italic; }
+
+    /* YouCan Pay tab */
+    .youcan-panel {
+      display: flex; flex-direction: column; align-items: center;
+      text-align: center; padding: 20px 0;
+    }
+    .youcan-logo {
+      width: 80px; height: 80px; border-radius: 20px; margin-bottom: 20px;
+      background: linear-gradient(135deg, #ff6b35, #f7931e);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 36px; box-shadow: 0 8px 30px rgba(255,107,53,0.3);
+    }
+    .youcan-title { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
+    .youcan-desc { font-size: 14px; color: var(--muted); line-height: 1.7; margin-bottom: 28px; max-width: 300px; }
+    .youcan-features { display: flex; gap: 16px; margin-bottom: 28px; flex-wrap: wrap; justify-content: center; }
+    .youcan-feat {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; color: var(--muted); padding: 6px 12px;
+      background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+      border-radius: 20px;
+    }
+    .btn-youcan {
+      width: 100%; padding: 14px; border-radius: 12px; border: none; cursor: pointer;
+      background: linear-gradient(135deg, #ff6b35, #f7931e);
+      color: white; font-family: var(--font); font-size: 15px; font-weight: 700;
+      transition: all 0.2s; box-shadow: 0 8px 24px rgba(255,107,53,0.3);
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn-youcan:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(255,107,53,0.4); }
+    .btn-youcan:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+    /* Pay button */
+    .btn-pay {
+      width: 100%; padding: 14px; border-radius: 12px; border: none; cursor: pointer;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: white; font-family: var(--font); font-size: 15px; font-weight: 700;
+      transition: all 0.2s; box-shadow: 0 8px 24px rgba(124,92,252,0.3); margin-top: 8px;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn-pay:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(124,92,252,0.5); }
+    .btn-pay:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+    /* Security badge */
+    .secure-badge {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      margin-top: 16px; font-size: 12px; color: var(--muted);
+    }
+    .secure-badge .lock { color: var(--success); }
+
+    /* Right: order summary */
+    .pay-summary {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 20px; padding: 28px; animation: fadeUp 0.5s 0.1s ease both;
+      position: sticky; top: 80px;
+    }
+    .summary-title { font-size: 14px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 20px; }
+    .summary-plan-name {
+      font-size: 24px; font-weight: 800; margin-bottom: 6px;
+      background: linear-gradient(135deg, #a78bfa, #e879f9); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .summary-rows { display: flex; flex-direction: column; gap: 12px; margin: 20px 0; }
+    .summary-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+    .summary-row .label { color: var(--muted); }
+    .summary-row .value { font-weight: 600; }
+    .summary-divider { height: 1px; background: var(--border); margin: 16px 0; }
+    .summary-total { display: flex; justify-content: space-between; align-items: center; }
+    .summary-total .label { font-size: 14px; font-weight: 600; }
+    .summary-total .value { font-size: 26px; font-weight: 800; color: var(--gold); }
+    .summary-total .currency { font-size: 13px; font-weight: 400; color: var(--muted); margin-right: 4px; }
+    .trust-badges { display: flex; flex-direction: column; gap: 10px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+    .trust-item { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+    .trust-icon { width: 28px; height: 28px; border-radius: 8px; background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.2); display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+    .test-hint {
+      margin-top: 20px; padding: 12px; border-radius: 10px;
+      background: rgba(240,192,64,0.08); border: 1px solid rgba(240,192,64,0.2);
+      font-size: 11px; color: var(--gold); text-align: center; line-height: 1.6;
+    }
+
     /* Toast */
     .toast {
       position: fixed; bottom: 24px; right: 24px; z-index: 9999;
@@ -569,6 +883,7 @@ export default function App() {
       .nav-links { display: none; }
       .hero-stats { gap: 20px; }
       .pricing-grid { grid-template-columns: 1fr; }
+      .pay-layout { grid-template-columns: 1fr; }
     }
   `;
 
@@ -773,7 +1088,7 @@ export default function App() {
             </ul>
             <button
               className={`plan-cta ${plan.popular ? "primary" : "secondary"}`}
-              onClick={() => { if (!user) setPage("login"); else showToast(lang === "ar" ? "قريباً!" : lang === "fr" ? "Bientôt!" : "Coming soon!"); }}
+              onClick={() => openPayment(plan)}
             >
               {plan.cta}
             </button>
@@ -782,6 +1097,214 @@ export default function App() {
       </div>
     </div>
   );
+
+  // ── Payment Page ────────────────────────────────────────────────────────────
+  const renderPayment = () => {
+    if (!selectedPlan) { setPage("pricing"); return null; }
+    const cfg = PLAN_CONFIG[selectedPlan.id];
+    const displayNum = cardNum || "•••• •••• •••• ••••";
+    const displayExp = cardExp || "MM/YY";
+    const displayName = cardName || (lang === "ar" ? "الاسم الكامل" : lang === "fr" ? "Nom du titulaire" : "FULL NAME");
+
+    return (
+      <div className="pay-page">
+        <div className="pay-bg" />
+        <div className="pay-layout">
+
+          {/* ── Left: Payment Form ── */}
+          <div className="pay-card">
+            <div className="pay-header">
+              <button className="pay-back" onClick={() => setPage("pricing")}>
+                ← {t.pay.backToPricing}
+              </button>
+              <h1 className="pay-title">💳 {t.pay.title}</h1>
+              <p className="pay-subtitle">{t.pay.subtitle}</p>
+            </div>
+
+            {/* Tabs */}
+            <div className="pay-tabs">
+              <button className={`pay-tab ${payTab === "card" ? "active" : ""}`} onClick={() => setPayTab("card")}>
+                💳 {lang === "ar" ? "بطاقة بنكية" : lang === "fr" ? "Carte bancaire" : "Credit Card"}
+              </button>
+              <button className={`pay-tab ${payTab === "youcan" ? "active" : ""}`} onClick={() => setPayTab("youcan")}>
+                🔶 YouCan Pay
+              </button>
+            </div>
+
+            {payTab === "card" && (
+              <>
+                {/* Card preview */}
+                <div className="card-preview">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div className="card-chip" />
+                    <div className="card-brand">VISA</div>
+                  </div>
+                  <div className="card-num-display">{displayNum}</div>
+                  <div className="card-bottom">
+                    <div>
+                      <div className="card-label-sm">{lang === "ar" ? "اسم الحامل" : lang === "fr" ? "Titulaire" : "CARD HOLDER"}</div>
+                      <div className="card-value-sm" style={{ textTransform: "uppercase" }}>{displayName}</div>
+                    </div>
+                    <div style={{ textAlign: isRTL ? "left" : "right" }}>
+                      <div className="card-label-sm">{lang === "ar" ? "تاريخ الانتهاء" : lang === "fr" ? "Expiration" : "EXPIRES"}</div>
+                      <div className="card-value-sm">{displayExp}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Card number */}
+                <div className="pay-field">
+                  <label className="pay-label">{t.pay.cardNumber}</label>
+                  <input
+                    className="pay-input card-num"
+                    placeholder="4242 4242 4242 4242"
+                    value={cardNum}
+                    onChange={e => setCardNum(formatCard(e.target.value))}
+                    maxLength={19}
+                  />
+                </div>
+
+                {/* Cardholder */}
+                <div className="pay-field">
+                  <label className="pay-label">{t.pay.cardHolder}</label>
+                  <input
+                    className="pay-input"
+                    placeholder={lang === "ar" ? "محمد العربي" : lang === "fr" ? "Jean Dupont" : "John Doe"}
+                    value={cardName}
+                    onChange={e => setCardName(e.target.value)}
+                  />
+                </div>
+
+                {/* Expiry + CVV */}
+                <div className="pay-field-row">
+                  <div className="pay-field">
+                    <label className="pay-label">{t.pay.expiry}</label>
+                    <input
+                      className="pay-input"
+                      placeholder={t.pay.monthYear}
+                      value={cardExp}
+                      onChange={e => setCardExp(formatExp(e.target.value))}
+                      maxLength={7}
+                    />
+                  </div>
+                  <div className="pay-field">
+                    <label className="pay-label">{t.pay.cvv}</label>
+                    <input
+                      className="pay-input"
+                      placeholder="•••"
+                      type="password"
+                      value={cardCvv}
+                      onChange={e => setCardCvv(e.target.value.replace(/\D/g,"").slice(0,4))}
+                      maxLength={4}
+                    />
+                  </div>
+                </div>
+
+                <button className="btn-pay" onClick={handleCardPay} disabled={payLoading}>
+                  {payLoading
+                    ? <><span className="spinner" />{t.pay.processing}</>
+                    : <>🔒 {t.pay.payNow} — {cfg.price_mad} {t.pay.currency}</>
+                  }
+                </button>
+                <div className="secure-badge">
+                  <span className="lock">🔒</span>
+                  {t.pay.secureBadge}
+                </div>
+              </>
+            )}
+
+            {payTab === "youcan" && (
+              <div className="youcan-panel">
+                <div className="youcan-logo">🔶</div>
+                <div className="youcan-title">{t.pay.youcanTitle}</div>
+                <div className="youcan-desc">{t.pay.youcanDesc}</div>
+                <div className="youcan-features">
+                  <div className="youcan-feat">🛡️ {lang === "ar" ? "دفع آمن" : lang === "fr" ? "Paiement sécurisé" : "Secure"}</div>
+                  <div className="youcan-feat">⚡ {lang === "ar" ? "فوري" : lang === "fr" ? "Instantané" : "Instant"}</div>
+                  <div className="youcan-feat">🇲🇦 {lang === "ar" ? "درهم مغربي" : "MAD"}</div>
+                  <div className="youcan-feat">🔄 {lang === "ar" ? "استرداد سهل" : lang === "fr" ? "Remboursement" : "Refundable"}</div>
+                </div>
+                <button className="btn-youcan" onClick={handleYouCanRedirect} disabled={payLoading} style={{ maxWidth: 320 }}>
+                  {payLoading
+                    ? <><span className="spinner" />{t.pay.processing}</>
+                    : <>{t.pay.youcanBtn} →</>
+                  }
+                </button>
+                <div className="secure-badge" style={{ marginTop: 14 }}>
+                  <span>🌐</span>
+                  {lang === "ar"
+                    ? `سيتم تحويلك إلى: ${APP_URL}/api/youcanpay/checkout`
+                    : `Redirect to: ${APP_URL}/api/youcanpay/checkout`}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Right: Order Summary ── */}
+          <div className="pay-summary">
+            <div className="summary-title">
+              {t.pay.orderSummary}
+            </div>
+            <div className="summary-plan-name">{selectedPlan.name}</div>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 4 }}>
+              {lang === "ar" ? "اشتراك شهري" : lang === "fr" ? "Abonnement mensuel" : "Monthly subscription"}
+            </div>
+
+            <div className="summary-rows">
+              <div className="summary-row">
+                <span className="label">{t.pay.plan}</span>
+                <span className="value">{selectedPlan.name}</span>
+              </div>
+              <div className="summary-row">
+                <span className="label">{t.pay.credits}</span>
+                <span className="value" style={{ color: "var(--accent)" }}>💰 {cfg.credits}</span>
+              </div>
+              <div className="summary-row">
+                <span className="label">{lang === "ar" ? "الفوترة" : lang === "fr" ? "Facturation" : "Billing"}</span>
+                <span className="value">{lang === "ar" ? "شهري" : lang === "fr" ? "Mensuelle" : "Monthly"}</span>
+              </div>
+            </div>
+
+            <div className="summary-divider" />
+
+            <div className="summary-total">
+              <span className="label">{t.pay.total}</span>
+              <span className="value">
+                <span className="currency">{t.pay.currency}</span>
+                {cfg.price_mad}
+              </span>
+            </div>
+
+            <div className="trust-badges">
+              <div className="trust-item">
+                <div className="trust-icon">✅</div>
+                <span>{t.pay.guarantee}</span>
+              </div>
+              <div className="trust-item">
+                <div className="trust-icon">💬</div>
+                <span>{t.pay.support}</span>
+              </div>
+              <div className="trust-item">
+                <div className="trust-icon">🔒</div>
+                <span>{t.pay.ssl}</span>
+              </div>
+              <div className="trust-item">
+                <div className="trust-icon">🔶</div>
+                <span>{lang === "ar" ? "مدعوم بـ YouCan Pay" : lang === "fr" ? "Propulsé par YouCan Pay" : "Powered by YouCan Pay"}</span>
+              </div>
+            </div>
+
+            <div className="test-hint">
+              🧪 {t.pay.testCard}
+              <br />
+              {lang === "ar" ? "CVV: أي 3 أرقام | الانتهاء: أي تاريخ مستقبلي" : lang === "fr" ? "CVV: 3 chiffres quelconques | Exp: toute date future" : "CVV: any 3 digits | Exp: any future date"}
+            </div>
+          </div>
+
+        </div>
+      </div>
+    );
+  };
 
   const renderLogin = () => (
     <div className="login-page">
@@ -814,7 +1337,16 @@ export default function App() {
     </div>
   );
 
-  const pages = { home: renderHero, chat: renderChat, images: renderImages, video: renderVideo, gallery: renderGallery, pricing: renderPricing, login: renderLogin };
+  const pages = {
+    home: renderHero,
+    chat: renderChat,
+    images: renderImages,
+    video: renderVideo,
+    gallery: renderGallery,
+    pricing: renderPricing,
+    payment: renderPayment,
+    login: renderLogin,
+  };
 
   return (
     <>
@@ -828,7 +1360,13 @@ export default function App() {
           </div>
           <div className="nav-links">
             {Object.entries(t.nav).map(([key, label]) => (
-              <button key={key} className={`nav-link ${page === key ? "active" : ""}`} onClick={() => user || key === "pricing" ? setPage(key) : setPage("login")}>{label}</button>
+              <button
+                key={key}
+                className={`nav-link ${page === key ? "active" : ""}`}
+                onClick={() => user || key === "pricing" ? setPage(key) : setPage("login")}
+              >
+                {label}
+              </button>
             ))}
           </div>
           <div className="nav-right">
