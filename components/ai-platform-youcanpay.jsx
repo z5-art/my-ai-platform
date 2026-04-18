@@ -5,9 +5,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 // ANTHROPIC_API_KEY, YOUCAN_PAY_PRIVATE_KEY, SUPABASE_SERVICE_ROLE_KEY
 // are NEVER exposed in client code — all API calls go through /api/* routes
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "";
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+// ─── متغيرات البيئة — تتوافق مع Vercel + Supabase Integration ───────────────
+// في Vercel تُضاف تلقائياً: STORAGE_SUPABASE_URL و STORAGE_SUPABASE_ANON_KEY
+// الكود يدعم المتغيرَين: القديم STORAGE_... والجديد NEXT_PUBLIC_...
+const APP_URL      = process.env.NEXT_PUBLIC_APP_URL      || "";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.STORAGE_SUPABASE_URL || "";
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.STORAGE_SUPABASE_ANON_KEY || "";
 
 // ─── Plan config ──────────────────────────────────────────────────────────────
 const PLAN_CONFIG = {
