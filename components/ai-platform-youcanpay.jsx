@@ -6,10 +6,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 // are NEVER exposed in client code — all API calls go through /api/* routes
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "";
-const SUPABASE_URL = process.env.NEXT_PUBLIC_STORAGE_SUPABASE_PUBLISHABLE_KEY
- || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_STORAGE_SUPABASE_ANON_KEY
- || "";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
 // ─── Plan config ──────────────────────────────────────────────────────────────
 const PLAN_CONFIG = {
