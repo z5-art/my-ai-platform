@@ -1,42 +1,86 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createCheckoutSession } from '@/lib/youcanpay'
+import { supabaseAdmin } from './supabase-server'
 
-const PLANS = {
-  starter: { amount: 9900, credits: 100, name: 'Starter' },
-  pro: { amount: 29900, credits: 500, name: 'Pro' },
-  unlimited: { amount: 59900, credits: 2000, name: 'Unlimited' }
+export async function checkAndDeductCredits(
+  userId: string,
+  cost: number,
+  toolName: string,
+  prompt?: string
+) {
+  if (userId === 'demo') return { success: true, balance: 999 }
+
+  const { data, error } = await supabaseAdmin.rpc('deduct_credits', {
+    p_user_id: userId,
+    p_amount:  cost,
+    p_tool:    toolName,
+    p_prompt:  prompt || null,
+  })
+
+  if (error) {
+    console.error('deduct_credits RPC error:', error.message)
+    return { success: false, message: 'Database error' }
+  }
+
+  if (!data?.success) {
+    return {
+      success: false,
+      message: data?.error === 'insufficient_credits'
+        ? 'رصيدك غير كافٍ'
+        : 'User not found',
+      balance: data?.balance ?? 0,
+    }
+  }
+
+  return { success: true, balance: data.balance }
 }
 
-export async function POST(req: NextRequest) {
-  try {
-    const { planId, userId, email } = await req.json()
+export async function getUserCredits(userId: string): Promise<number> {
+  if (userId === 'demo') return 999
 
-    const plan = PLANS[planId as keyof typeof PLANS]
-    if (!plan) {
-      return NextResponse.json(
-        { error: 'خطة غير موجودة' },
-        { status: 400 }
-      )
-    }
+  const { data, error } = await supabaseAdmin
+    .from('profiles')
+    .select('credits')
+    .eq('id', userId)
+    .single()
 
-    const orderId = `${userId}_${planId}_${Date.now()}`
+  if (error || !data) return 0
+  return data.credits ?? 0
+}
 
-    const session = await createCheckoutSession(
-      plan.amount,
-      'MAD',
-      orderId,
-      email
-    )
-
-    return NextResponse.json({
-      checkout_url: session.checkout_url,
-      order_id: orderId
-    })
-
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'حدث خطأ' },
-      { status: 500 }
-    )
+export async function saveToGallery(
+  userId: string,
+  item: {
+    type: 'image' | 'video'
+    url: string
+    prompt: string
+    mode?: string
+    style?: string
+    duration?: string
+    resolution?: string
+    aspect_ratio?: string
+    credits_used?: number
+    thumbnail?: string
   }
+) {
+  if (userId === 'demo') return { success: true }
+
+  const { error } = await supabaseAdmin
+    .from('gallery')
+    .insert({ user_id: userId, ...item })
+
+  if (error) console.error('saveToGallery error:', error.message)
+  return { success: !error }
+}
+
+export async function saveChatMessage(
+  userId: string,
+  role: 'user' | 'assistant',
+  content: string
+) {
+  if (userId === 'demo') return
+
+  const { error } = await supabaseAdmin
+    .from('chat_history')
+    .insert({ user_id: userId, role, content })
+
+  if (error) console.error('saveChatMessage error:', error.message)
 }

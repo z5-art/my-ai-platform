@@ -1,9 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+import { supabaseAdmin } from './supabase-server'
 
 export async function checkAndDeductCredits(
   userId: string,
@@ -11,12 +6,9 @@ export async function checkAndDeductCredits(
   toolName: string,
   prompt?: string
 ) {
-  // Demo user — skip DB check
-  if (userId === 'demo') {
-    return { success: true, balance: 999 }
-  }
+  if (userId === 'demo') return { success: true, balance: 999 }
 
-  const { data, error } = await supabase.rpc('deduct_credits', {
+  const { data, error } = await supabaseAdmin.rpc('deduct_credits', {
     p_user_id: userId,
     p_amount:  cost,
     p_tool:    toolName,
@@ -24,17 +16,17 @@ export async function checkAndDeductCredits(
   })
 
   if (error) {
-    console.error('deduct_credits error:', error)
+    console.error('deduct_credits RPC error:', error.message)
     return { success: false, message: 'Database error' }
   }
 
-  if (!data.success) {
+  if (!data?.success) {
     return {
       success: false,
-      message: data.error === 'insufficient_credits'
+      message: data?.error === 'insufficient_credits'
         ? 'رصيدك غير كافٍ'
         : 'User not found',
-      balance: data.balance,
+      balance: data?.balance ?? 0,
     }
   }
 
@@ -44,7 +36,7 @@ export async function checkAndDeductCredits(
 export async function getUserCredits(userId: string): Promise<number> {
   if (userId === 'demo') return 999
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('profiles')
     .select('credits')
     .eq('id', userId)
@@ -66,14 +58,16 @@ export async function saveToGallery(
     resolution?: string
     aspect_ratio?: string
     credits_used?: number
+    thumbnail?: string
   }
 ) {
   if (userId === 'demo') return { success: true }
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from('gallery')
     .insert({ user_id: userId, ...item })
 
+  if (error) console.error('saveToGallery error:', error.message)
   return { success: !error }
 }
 
@@ -84,7 +78,9 @@ export async function saveChatMessage(
 ) {
   if (userId === 'demo') return
 
-  await supabase
+  const { error } = await supabaseAdmin
     .from('chat_history')
     .insert({ user_id: userId, role, content })
+
+  if (error) console.error('saveChatMessage error:', error.message)
 }
