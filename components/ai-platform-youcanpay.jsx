@@ -1,309 +1,141 @@
-'use client';
+'use client'
 import { useState, useEffect, useRef, useCallback } from "react";
 
-// ─── Config from deploy guide ─────────────────────────────────────────────────
-const APP_URL = "https://my-ai-platform.vercel.app";
-const SUPABASE_URL = "https://uiehcsmidizvmebkypgg.supabase.co";
+// ─── Security: All sensitive keys are server-side only ────────────────────────
+// ANTHROPIC_API_KEY, YOUCAN_PAY_PRIVATE_KEY, SUPABASE_SERVICE_ROLE_KEY
+// are NEVER exposed in client code — all API calls go through /api/* routes
 
-// ─── Plan config (matches types/index.ts in deploy guide) ────────────────────
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+
+// ─── Plan config ──────────────────────────────────────────────────────────────
 const PLAN_CONFIG = {
   free:  { credits: 50,   price_mad: 0,   price_label: "0 درهم" },
   pro:   { credits: 500,  price_mad: 99,  price_label: "99 درهم" },
   ultra: { credits: 2000, price_mad: 299, price_label: "299 درهم" },
 };
 
+// ─── Video modes ──────────────────────────────────────────────────────────────
+const VIDEO_MODES = {
+  text2video: { icon: "✍️", costAr: "50 رصيد", costFr: "50 crédits", costEn: "50 credits" },
+  img2video:  { icon: "🖼️", costAr: "60 رصيد", costFr: "60 crédits", costEn: "60 credits" },
+  effects:    { icon: "✨", costAr: "40 رصيد", costFr: "40 crédits", costEn: "40 credits" },
+  lipsync:    { icon: "🎤", costAr: "70 رصيد", costFr: "70 crédits", costEn: "70 credits" },
+};
+
 // ─── Translations ─────────────────────────────────────────────────────────────
-const TRANSLATIONS = {
+const T = {
   ar: {
-    dir: "rtl",
-    name: "إبداع AI",
+    dir: "rtl", name: "إبداع AI",
     tagline: "منصة الذكاء الاصطناعي لإبداع بلا حدود",
-    nav: { chat: "المحادثة", images: "الصور", video: "الفيديو", gallery: "معرضي", pricing: "الأسعار" },
-    hero: {
-      title: "اصنع المستقبل",
-      subtitle: "بالذكاء الاصطناعي",
-      desc: "توليد صور، فيديوهات، ومحادثات ذكية — كل ما تحتاجه في مكان واحد",
-      cta: "ابدأ مجاناً",
-      demo: "شاهد العرض",
-    },
-    chat: {
-      title: "المحادثة الذكية",
-      placeholder: "اكتب رسالتك هنا...",
-      send: "إرسال",
-      clear: "مسح",
-      thinking: "جاري التفكير...",
-      welcome: "مرحباً! أنا مساعدك الذكي. كيف يمكنني مساعدتك اليوم؟",
-    },
-    image: {
-      title: "توليد الصور",
-      placeholder: "صِف الصورة التي تريدها... مثال: غروب شمس فوق المحيط بألوان ذهبية",
-      generate: "توليد الصورة",
-      generating: "جاري التوليد...",
-      style: "النمط",
-      styles: { realistic: "واقعي", artistic: "فني", anime: "أنمي", abstract: "تجريدي" },
-      cost: "تكلفة: 10 رصيد",
-    },
+    nav: { chat: "المحادثة", images: "الصور", video: "الفيديو", gallery: "معرضي", pricing: "الأسعار", profile: "حسابي" },
+    hero: { title: "اصنع المستقبل", subtitle: "بالذكاء الاصطناعي", desc: "توليد صور، فيديوهات، ومحادثات ذكية — كل ما تحتاجه في مكان واحد", cta: "ابدأ مجاناً", demo: "الأسعار" },
+    chat: { title: "المحادثة الذكية", placeholder: "اكتب رسالتك هنا...", send: "إرسال", clear: "مسح", thinking: "جاري التفكير...", welcome: "مرحباً! أنا مساعدك الذكي. كيف يمكنني مساعدتك اليوم؟" },
+    image: { title: "توليد الصور", placeholder: "صِف الصورة التي تريدها...", generate: "توليد الصورة", generating: "جاري التوليد...", style: "النمط", styles: { realistic: "واقعي", artistic: "فني", anime: "أنمي", abstract: "تجريدي" }, cost: "تكلفة: 10 رصيد", uploadLabel: "📎 أضف صورة مرجعية", uploadHint: "اسحب وأفلت أو انقر للرفع" },
     video: {
-      title: "توليد الفيديو",
-      placeholder: "صِف الفيديو الذي تريده... مثال: طائر يحلق فوق مدينة مضيئة في الليل",
-      generate: "توليد الفيديو",
-      generating: "جاري المعالجة... قد يستغرق دقيقة",
-      duration: "المدة",
-      cost: "تكلفة: 50 رصيد",
+      title: "توليد الفيديو", generate: "توليد الفيديو", generating: "جاري المعالجة...", duration: "المدة",
+      modes: { text2video: "نص إلى فيديو", img2video: "صورة إلى فيديو", effects: "مؤثرات بصرية", lipsync: "مزامنة الشفاه" },
+      placeholders: { text2video: "صِف الفيديو... مثال: طائر يحلق فوق مدينة مضيئة", img2video: "صِف التحويل... مثال: اجعل الصورة تتحرك ببطء", effects: "صِف المؤثر... مثال: تأثير سينمائي مع ضباب", lipsync: "أضف نصاً للمزامنة مع الشخصية..." },
+      uploadImg: "📎 ارفع صورة للتحويل", uploadVid: "🎬 ارفع فيديو للمؤثرات", resolution: "الدقة", aspectRatio: "نسبة العرض",
     },
     gallery: { title: "معرض أعمالي", empty: "لا توجد أعمال بعد. ابدأ بتوليد صورة أو فيديو!", delete: "حذف" },
     pricing: {
-      title: "اختر خطتك",
-      subtitle: "ابدأ مجاناً، طور حسب احتياجك",
+      title: "اختر خطتك", subtitle: "ابدأ مجاناً، طور حسب احتياجك",
       plans: [
-        { id: "free",  name: "المجاني",    price: "0",   currency: "درهم/شهر", credits: 50,   features: ["50 رصيد شهرياً", "توليد صور عادية", "محادثة مفتوحة", "معرض 10 أعمال"],                                                                   cta: "ابدأ مجاناً",   popular: false },
-        { id: "pro",   name: "الاحترافي", price: "99",  currency: "درهم/شهر", credits: 500,  features: ["500 رصيد شهرياً", "توليد صور عالية الجودة", "توليد فيديو قصير", "محادثة غير محدودة", "معرض 100 عمل", "أولوية المعالجة"], cta: "اشترك الآن",   popular: true },
-        { id: "ultra", name: "الأعمال",   price: "299", currency: "درهم/شهر", credits: 2000, features: ["2000 رصيد شهرياً", "جميع الميزات", "فيديو 4K", "API مخصص", "دعم أولوي 24/7", "معرض غير محدود"],                                cta: "تواصل معنا",  popular: false },
+        { id: "free",  name: "المجاني",    price: "0",   currency: "درهم/شهر", credits: 50,   features: ["50 رصيد شهرياً", "توليد صور عادية", "محادثة مفتوحة", "معرض 10 أعمال"], cta: "ابدأ مجاناً", popular: false },
+        { id: "pro",   name: "الاحترافي", price: "99",  currency: "درهم/شهر", credits: 500,  features: ["500 رصيد شهرياً", "توليد صور HD", "فيديو بكل الأوضاع", "محادثة غير محدودة", "معرض 100 عمل", "أولوية المعالجة"], cta: "اشترك الآن", popular: true },
+        { id: "ultra", name: "الأعمال",   price: "299", currency: "درهم/شهر", credits: 2000, features: ["2000 رصيد شهرياً", "جميع الميزات", "فيديو 4K", "API مخصص", "دعم 24/7", "معرض غير محدود"], cta: "تواصل معنا", popular: false },
       ],
     },
-    credits: "الرصيد",
-    logout: "خروج",
-    login: "دخول",
-    loginTitle: "مرحباً بعودتك",
-    loginSub: "سجل دخولك للمتابعة",
-    email: "البريد الإلكتروني",
-    password: "كلمة المرور",
-    loginBtn: "تسجيل الدخول",
-    registerBtn: "إنشاء حساب",
-    noAccount: "ليس لديك حساب؟",
-    hasAccount: "لديك حساب؟",
+    credits: "الرصيد", logout: "خروج", login: "دخول",
+    loginTitle: "مرحباً بعودتك", loginSub: "سجل دخولك للمتابعة",
+    email: "البريد الإلكتروني", password: "كلمة المرور",
+    firstName: "الاسم الأول", lastName: "اللقب", phone: "رقم الهاتف",
+    loginBtn: "تسجيل الدخول", registerBtn: "إنشاء حساب",
+    noAccount: "ليس لديك حساب؟", hasAccount: "لديك حساب؟",
     demoLogin: "دخول تجريبي",
+    fillAll: "يرجى ملء جميع الحقول",
     toast: { copied: "تم النسخ!", generated: "تم التوليد بنجاح!", error: "حدث خطأ، حاول مجدداً", noCredits: "رصيدك غير كافٍ! يرجى الترقية" },
-    // ── Payment page strings ──
-    pay: {
-      title: "إتمام الدفع",
-      subtitle: "أنت على بُعد خطوة واحدة من الإبداع اللامحدود",
-      orderSummary: "ملخص الطلب",
-      plan: "الخطة",
-      credits: "الرصيد",
-      total: "المجموع",
-      currency: "درهم مغربي",
-      secureBadge: "دفع آمن ومشفر بـ YouCan Pay",
-      cardNumber: "رقم البطاقة",
-      expiry: "تاريخ الانتهاء",
-      cvv: "رمز CVV",
-      cardHolder: "اسم حامل البطاقة",
-      payNow: "ادفع الآن",
-      processing: "جاري المعالجة...",
-      back: "رجوع",
-      orPay: "أو ادفع عبر",
-      success: "تم الدفع بنجاح! تم إضافة رصيدك.",
-      failed: "فشل الدفع. يرجى المحاولة مجدداً.",
-      redirect: "سيتم تحويلك لبوابة YouCan Pay...",
-      monthYear: "شهر / سنة",
-      testCard: "بطاقة تجريبية: 4242 4242 4242 4242",
-      youcanTitle: "الدفع عبر بوابة YouCan Pay",
-      youcanDesc: "سيتم تحويلك إلى بوابة الدفع الآمنة لإتمام المعاملة",
-      youcanBtn: "الانتقال إلى YouCan Pay",
-      backToPricing: "العودة للأسعار",
-      guarantee: "ضمان استرداد المال خلال 7 أيام",
-      support: "دعم 24/7",
-      ssl: "تشفير SSL",
-    },
+    pay: { title: "إتمام الدفع", subtitle: "أنت على بُعد خطوة واحدة", orderSummary: "ملخص الطلب", plan: "الخطة", credits: "الرصيد", total: "المجموع", currency: "درهم مغربي", secureBadge: "دفع آمن بـ YouCan Pay", payNow: "ادفع الآن", processing: "جاري المعالجة...", back: "رجوع", success: "تم الدفع! تم إضافة رصيدك.", failed: "فشل الدفع.", redirect: "جاري التحويل...", youcanBtn: "الدفع عبر YouCan Pay", backToPricing: "العودة للأسعار", guarantee: "ضمان 7 أيام", support: "دعم 24/7", ssl: "تشفير SSL" },
+    profile: { title: "حسابي", plan: "خطتي", credits: "رصيدي", joined: "عضو منذ", editName: "تعديل الاسم", save: "حفظ", history: "سجل الاستخدام", noHistory: "لا يوجد سجل بعد" },
+    uploadMedia: "📎 ارفع ملفاً",
   },
   fr: {
-    dir: "ltr",
-    name: "Ibda3 AI",
-    tagline: "La plateforme d'IA pour une créativité sans limites",
-    nav: { chat: "Chat", images: "Images", video: "Vidéo", gallery: "Galerie", pricing: "Tarifs" },
-    hero: {
-      title: "Créez l'avenir",
-      subtitle: "avec l'Intelligence Artificielle",
-      desc: "Génération d'images, vidéos et conversations intelligentes — tout ce dont vous avez besoin en un seul endroit",
-      cta: "Commencer gratuitement",
-      demo: "Voir la démo",
-    },
-    chat: {
-      title: "Chat Intelligent",
-      placeholder: "Écrivez votre message ici...",
-      send: "Envoyer",
-      clear: "Effacer",
-      thinking: "En train de réfléchir...",
-      welcome: "Bonjour! Je suis votre assistant IA. Comment puis-je vous aider aujourd'hui?",
-    },
-    image: {
-      title: "Génération d'Images",
-      placeholder: "Décrivez l'image souhaitée... Ex: coucher de soleil sur l'océan aux couleurs dorées",
-      generate: "Générer l'image",
-      generating: "Génération en cours...",
-      style: "Style",
-      styles: { realistic: "Réaliste", artistic: "Artistique", anime: "Animé", abstract: "Abstrait" },
-      cost: "Coût: 10 crédits",
-    },
+    dir: "ltr", name: "Ibda3 AI",
+    tagline: "La plateforme IA pour une créativité sans limites",
+    nav: { chat: "Chat", images: "Images", video: "Vidéo", gallery: "Galerie", pricing: "Tarifs", profile: "Profil" },
+    hero: { title: "Créez l'avenir", subtitle: "avec l'Intelligence Artificielle", desc: "Génération d'images, vidéos et conversations — tout en un", cta: "Commencer gratuitement", demo: "Tarifs" },
+    chat: { title: "Chat Intelligent", placeholder: "Écrivez votre message...", send: "Envoyer", clear: "Effacer", thinking: "Réflexion...", welcome: "Bonjour! Je suis votre assistant IA." },
+    image: { title: "Génération d'Images", placeholder: "Décrivez l'image souhaitée...", generate: "Générer", generating: "Génération...", style: "Style", styles: { realistic: "Réaliste", artistic: "Artistique", anime: "Animé", abstract: "Abstrait" }, cost: "Coût: 10 crédits", uploadLabel: "📎 Ajouter une image", uploadHint: "Glissez ou cliquez pour uploader" },
     video: {
-      title: "Génération de Vidéo",
-      placeholder: "Décrivez la vidéo... Ex: oiseau volant au-dessus d'une ville lumineuse la nuit",
-      generate: "Générer la vidéo",
-      generating: "Traitement en cours... peut prendre une minute",
-      duration: "Durée",
-      cost: "Coût: 50 crédits",
+      title: "Génération de Vidéo", generate: "Générer", generating: "Traitement...", duration: "Durée",
+      modes: { text2video: "Texte en Vidéo", img2video: "Image en Vidéo", effects: "Effets Visuels", lipsync: "Lip Sync" },
+      placeholders: { text2video: "Décrivez la vidéo...", img2video: "Décrivez la transformation...", effects: "Décrivez l'effet...", lipsync: "Ajoutez le texte à synchroniser..." },
+      uploadImg: "📎 Uploader une image", uploadVid: "🎬 Uploader une vidéo", resolution: "Résolution", aspectRatio: "Format",
     },
-    gallery: { title: "Ma Galerie", empty: "Aucune création pour l'instant. Commencez à générer!", delete: "Supprimer" },
+    gallery: { title: "Ma Galerie", empty: "Aucune création. Commencez!", delete: "Supprimer" },
     pricing: {
-      title: "Choisissez votre plan",
-      subtitle: "Commencez gratuitement, évoluez selon vos besoins",
+      title: "Choisissez votre plan", subtitle: "Commencez gratuitement",
       plans: [
-        { id: "free",  name: "Gratuit",  price: "0",   currency: "MAD/mois", credits: 50,   features: ["50 crédits/mois", "Génération d'images standard", "Chat illimité", "Galerie 10 créations"],                                                    cta: "Commencer gratuitement", popular: false },
-        { id: "pro",   name: "Pro",      price: "99",  currency: "MAD/mois", credits: 500,  features: ["500 crédits/mois", "Images haute qualité", "Génération vidéo courte", "Chat illimité", "Galerie 100 créations", "Traitement prioritaire"], cta: "S'abonner",              popular: true },
-        { id: "ultra", name: "Business", price: "299", currency: "MAD/mois", credits: 2000, features: ["2000 crédits/mois", "Toutes les fonctionnalités", "Vidéo 4K", "API dédiée", "Support prioritaire 24/7", "Galerie illimitée"],            cta: "Nous contacter",         popular: false },
+        { id: "free",  name: "Gratuit",  price: "0",   currency: "MAD/mois", credits: 50,   features: ["50 crédits/mois", "Images standard", "Chat illimité", "Galerie 10"], cta: "Commencer", popular: false },
+        { id: "pro",   name: "Pro",      price: "99",  currency: "MAD/mois", credits: 500,  features: ["500 crédits/mois", "Images HD", "Tous modes vidéo", "Chat illimité", "Galerie 100", "Prioritaire"], cta: "S'abonner", popular: true },
+        { id: "ultra", name: "Business", price: "299", currency: "MAD/mois", credits: 2000, features: ["2000 crédits/mois", "Tout inclus", "Vidéo 4K", "API dédiée", "Support 24/7", "Galerie illimitée"], cta: "Contactez-nous", popular: false },
       ],
     },
-    credits: "Crédits",
-    logout: "Déconnexion",
-    login: "Connexion",
-    loginTitle: "Bon retour",
-    loginSub: "Connectez-vous pour continuer",
-    email: "Email",
-    password: "Mot de passe",
-    loginBtn: "Se connecter",
-    registerBtn: "Créer un compte",
-    noAccount: "Pas de compte?",
-    hasAccount: "Déjà un compte?",
-    demoLogin: "Connexion démo",
-    toast: { copied: "Copié!", generated: "Généré avec succès!", error: "Erreur, réessayez", noCredits: "Crédits insuffisants! Passez à un plan supérieur" },
-    pay: {
-      title: "Finaliser le paiement",
-      subtitle: "Vous êtes à un pas d'une créativité illimitée",
-      orderSummary: "Récapitulatif",
-      plan: "Plan",
-      credits: "Crédits",
-      total: "Total",
-      currency: "MAD",
-      secureBadge: "Paiement sécurisé via YouCan Pay",
-      cardNumber: "Numéro de carte",
-      expiry: "Date d'expiration",
-      cvv: "Code CVV",
-      cardHolder: "Nom du titulaire",
-      payNow: "Payer maintenant",
-      processing: "Traitement en cours...",
-      back: "Retour",
-      orPay: "Ou payer via",
-      success: "Paiement réussi! Vos crédits ont été ajoutés.",
-      failed: "Paiement échoué. Veuillez réessayer.",
-      redirect: "Redirection vers YouCan Pay...",
-      monthYear: "MM / AA",
-      testCard: "Carte test: 4242 4242 4242 4242",
-      youcanTitle: "Paiement via YouCan Pay",
-      youcanDesc: "Vous serez redirigé vers la passerelle de paiement sécurisée",
-      youcanBtn: "Aller vers YouCan Pay",
-      backToPricing: "Retour aux tarifs",
-      guarantee: "Remboursement garanti 7 jours",
-      support: "Support 24/7",
-      ssl: "Cryptage SSL",
-    },
+    credits: "Crédits", logout: "Déconnexion", login: "Connexion",
+    loginTitle: "Bon retour", loginSub: "Connectez-vous pour continuer",
+    email: "Email", password: "Mot de passe",
+    firstName: "Prénom", lastName: "Nom", phone: "Téléphone",
+    loginBtn: "Se connecter", registerBtn: "Créer un compte",
+    noAccount: "Pas de compte?", hasAccount: "Déjà un compte?",
+    demoLogin: "Connexion démo", fillAll: "Veuillez remplir tous les champs",
+    toast: { copied: "Copié!", generated: "Généré!", error: "Erreur", noCredits: "Crédits insuffisants!" },
+    pay: { title: "Finaliser le paiement", subtitle: "Un pas vers la créativité", orderSummary: "Récapitulatif", plan: "Plan", credits: "Crédits", total: "Total", currency: "MAD", secureBadge: "Paiement sécurisé YouCan Pay", payNow: "Payer", processing: "Traitement...", back: "Retour", success: "Paiement réussi!", failed: "Échec.", redirect: "Redirection...", youcanBtn: "Payer via YouCan Pay", backToPricing: "Retour tarifs", guarantee: "Garantie 7 jours", support: "Support 24/7", ssl: "SSL" },
+    profile: { title: "Mon Profil", plan: "Mon plan", credits: "Mes crédits", joined: "Membre depuis", editName: "Modifier le nom", save: "Sauvegarder", history: "Historique", noHistory: "Aucun historique" },
+    uploadMedia: "📎 Uploader",
   },
   en: {
-    dir: "ltr",
-    name: "Ibda3 AI",
+    dir: "ltr", name: "Ibda3 AI",
     tagline: "The AI platform for limitless creativity",
-    nav: { chat: "Chat", images: "Images", video: "Video", gallery: "Gallery", pricing: "Pricing" },
-    hero: {
-      title: "Build the Future",
-      subtitle: "with Artificial Intelligence",
-      desc: "Generate images, videos, and intelligent conversations — everything you need in one place",
-      cta: "Start for Free",
-      demo: "Watch Demo",
-    },
-    chat: {
-      title: "Smart Chat",
-      placeholder: "Type your message here...",
-      send: "Send",
-      clear: "Clear",
-      thinking: "Thinking...",
-      welcome: "Hello! I'm your AI assistant. How can I help you today?",
-    },
-    image: {
-      title: "Image Generation",
-      placeholder: "Describe the image you want... e.g. sunset over the ocean in golden colors",
-      generate: "Generate Image",
-      generating: "Generating...",
-      style: "Style",
-      styles: { realistic: "Realistic", artistic: "Artistic", anime: "Anime", abstract: "Abstract" },
-      cost: "Cost: 10 credits",
-    },
+    nav: { chat: "Chat", images: "Images", video: "Video", gallery: "Gallery", pricing: "Pricing", profile: "Profile" },
+    hero: { title: "Build the Future", subtitle: "with Artificial Intelligence", desc: "Generate images, videos, and intelligent conversations — all in one place", cta: "Start for Free", demo: "Pricing" },
+    chat: { title: "Smart Chat", placeholder: "Type your message...", send: "Send", clear: "Clear", thinking: "Thinking...", welcome: "Hello! I'm your AI assistant. How can I help?" },
+    image: { title: "Image Generation", placeholder: "Describe the image you want...", generate: "Generate Image", generating: "Generating...", style: "Style", styles: { realistic: "Realistic", artistic: "Artistic", anime: "Anime", abstract: "Abstract" }, cost: "Cost: 10 credits", uploadLabel: "📎 Add reference image", uploadHint: "Drag & drop or click to upload" },
     video: {
-      title: "Video Generation",
-      placeholder: "Describe your video... e.g. a bird flying over a glowing city at night",
-      generate: "Generate Video",
-      generating: "Processing... may take a minute",
-      duration: "Duration",
-      cost: "Cost: 50 credits",
+      title: "Video Generation", generate: "Generate Video", generating: "Processing...", duration: "Duration",
+      modes: { text2video: "Text to Video", img2video: "Image to Video", effects: "Visual Effects", lipsync: "Lip Sync" },
+      placeholders: { text2video: "Describe the video...", img2video: "Describe the transformation...", effects: "Describe the effect...", lipsync: "Add text to sync with character..." },
+      uploadImg: "📎 Upload image", uploadVid: "🎬 Upload video", resolution: "Resolution", aspectRatio: "Aspect Ratio",
     },
-    gallery: { title: "My Gallery", empty: "No creations yet. Start generating images or videos!", delete: "Delete" },
+    gallery: { title: "My Gallery", empty: "No creations yet. Start generating!", delete: "Delete" },
     pricing: {
-      title: "Choose Your Plan",
-      subtitle: "Start free, scale as you grow",
+      title: "Choose Your Plan", subtitle: "Start free, scale as you grow",
       plans: [
-        { id: "free",  name: "Free",     price: "0",   currency: "MAD/mo", credits: 50,   features: ["50 credits/month", "Standard image generation", "Unlimited chat", "Gallery 10 creations"],                                                     cta: "Get Started Free", popular: false },
-        { id: "pro",   name: "Pro",      price: "99",  currency: "MAD/mo", credits: 500,  features: ["500 credits/month", "HD image generation", "Short video generation", "Unlimited chat", "Gallery 100 creations", "Priority processing"], cta: "Subscribe Now",    popular: true },
-        { id: "ultra", name: "Business", price: "299", currency: "MAD/mo", credits: 2000, features: ["2000 credits/month", "All features", "4K video", "Dedicated API", "24/7 priority support", "Unlimited gallery"],                       cta: "Contact Us",       popular: false },
+        { id: "free",  name: "Free",     price: "0",   currency: "MAD/mo", credits: 50,   features: ["50 credits/month", "Standard images", "Unlimited chat", "Gallery 10"], cta: "Get Started", popular: false },
+        { id: "pro",   name: "Pro",      price: "99",  currency: "MAD/mo", credits: 500,  features: ["500 credits/month", "HD images", "All video modes", "Unlimited chat", "Gallery 100", "Priority"], cta: "Subscribe", popular: true },
+        { id: "ultra", name: "Business", price: "299", currency: "MAD/mo", credits: 2000, features: ["2000 credits/month", "Everything", "4K video", "Dedicated API", "24/7 support", "Unlimited gallery"], cta: "Contact Us", popular: false },
       ],
     },
-    credits: "Credits",
-    logout: "Logout",
-    login: "Login",
-    loginTitle: "Welcome Back",
-    loginSub: "Sign in to continue",
-    email: "Email",
-    password: "Password",
-    loginBtn: "Sign In",
-    registerBtn: "Create Account",
-    noAccount: "No account?",
-    hasAccount: "Have an account?",
-    demoLogin: "Demo Login",
-    toast: { copied: "Copied!", generated: "Generated successfully!", error: "Error, please try again", noCredits: "Insufficient credits! Please upgrade" },
-    pay: {
-      title: "Complete Payment",
-      subtitle: "You're one step away from unlimited creativity",
-      orderSummary: "Order Summary",
-      plan: "Plan",
-      credits: "Credits",
-      total: "Total",
-      currency: "MAD",
-      secureBadge: "Secure payment via YouCan Pay",
-      cardNumber: "Card Number",
-      expiry: "Expiry Date",
-      cvv: "CVV Code",
-      cardHolder: "Cardholder Name",
-      payNow: "Pay Now",
-      processing: "Processing...",
-      back: "Back",
-      orPay: "Or pay via",
-      success: "Payment successful! Your credits have been added.",
-      failed: "Payment failed. Please try again.",
-      redirect: "Redirecting to YouCan Pay...",
-      monthYear: "MM / YY",
-      testCard: "Test card: 4242 4242 4242 4242",
-      youcanTitle: "Pay via YouCan Pay",
-      youcanDesc: "You will be redirected to the secure payment gateway to complete your transaction",
-      youcanBtn: "Go to YouCan Pay",
-      backToPricing: "Back to Pricing",
-      guarantee: "7-day money-back guarantee",
-      support: "24/7 Support",
-      ssl: "SSL Encrypted",
-    },
+    credits: "Credits", logout: "Logout", login: "Login",
+    loginTitle: "Welcome Back", loginSub: "Sign in to continue",
+    email: "Email", password: "Password",
+    firstName: "First Name", lastName: "Last Name", phone: "Phone",
+    loginBtn: "Sign In", registerBtn: "Create Account",
+    noAccount: "No account?", hasAccount: "Have an account?",
+    demoLogin: "Demo Login", fillAll: "Please fill all fields",
+    toast: { copied: "Copied!", generated: "Generated!", error: "Error", noCredits: "Insufficient credits!" },
+    pay: { title: "Complete Payment", subtitle: "One step away", orderSummary: "Order Summary", plan: "Plan", credits: "Credits", total: "Total", currency: "MAD", secureBadge: "Secure payment via YouCan Pay", payNow: "Pay Now", processing: "Processing...", back: "Back", success: "Payment successful!", failed: "Payment failed.", redirect: "Redirecting...", youcanBtn: "Pay via YouCan Pay", backToPricing: "Back to Pricing", guarantee: "7-day guarantee", support: "24/7 Support", ssl: "SSL" },
+    profile: { title: "My Profile", plan: "My Plan", credits: "My Credits", joined: "Member since", editName: "Edit Name", save: "Save", history: "Usage History", noHistory: "No history yet" },
+    uploadMedia: "📎 Upload File",
   },
 };
 
-// ─── Demo image placeholders ──────────────────────────────────────────────────
-const DEMO_IMAGES = [
-  "https://picsum.photos/seed/ai1/400/300",
-  "https://picsum.photos/seed/ai2/400/300",
-  "https://picsum.photos/seed/ai3/400/300",
-  "https://picsum.photos/seed/ai4/400/300",
-];
-
-// ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [lang, setLang] = useState("ar");
   const [page, setPage] = useState("home");
   const [user, setUser] = useState(null);
-  const [credits, setCredits] = useState(150);
+  const [credits, setCredits] = useState(50);
   const [gallery, setGallery] = useState([]);
   const [toast, setToast] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
@@ -313,22 +145,32 @@ export default function App() {
   const [imageStyle, setImageStyle] = useState("realistic");
   const [imageLoading, setImageLoading] = useState(false);
   const [generatedImage, setGeneratedImage] = useState(null);
+  const [imageFile, setImageFile] = useState(null);
   const [videoPrompt, setVideoPrompt] = useState("");
+  const [videoMode, setVideoMode] = useState("text2video");
   const [videoDuration, setVideoDuration] = useState("5");
+  const [videoAspect, setVideoAspect] = useState("16:9");
+  const [videoResolution, setVideoResolution] = useState("720p");
   const [videoLoading, setVideoLoading] = useState(false);
   const [generatedVideo, setGeneratedVideo] = useState(null);
+  const [videoFile, setVideoFile] = useState(null);
   const [loginMode, setLoginMode] = useState("login");
-  // ── Payment state ──
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPass, setLoginPass] = useState("");
+  const [loginFirst, setLoginFirst] = useState("");
+  const [loginLast, setLoginLast] = useState("");
+  const [loginPhone, setLoginPhone] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState(null);
-  const [payTab, setPayTab] = useState("card"); // "card" | "youcan"
   const [payLoading, setPayLoading] = useState(false);
-  const [cardNum, setCardNum] = useState("");
-  const [cardExp, setCardExp] = useState("");
-  const [cardCvv, setCardCvv] = useState("");
-  const [cardName, setCardName] = useState("");
+  const [editingName, setEditingName] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [usageHistory, setUsageHistory] = useState([]);
   const chatEndRef = useRef(null);
+  const imageFileRef = useRef(null);
+  const videoFileRef = useRef(null);
 
-  const t = TRANSLATIONS[lang];
+  const t = T[lang];
   const isRTL = t.dir === "rtl";
 
   useEffect(() => {
@@ -345,62 +187,57 @@ export default function App() {
     setTimeout(() => setToast(null), 3500);
   }, []);
 
+  // ── Supabase Auth ────────────────────────────────────────────────────────────
+  const handleLogin = async () => {
+    if (!loginEmail || !loginPass) { showToast(t.fillAll, "error"); return; }
+    setLoginLoading(true);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
+        body: JSON.stringify({ email: loginEmail, password: loginPass }),
+      });
+      const data = await res.json();
+      if (data.error) { showToast(data.error_description || t.toast.error, "error"); }
+      else {
+        setUser({ name: data.user?.user_metadata?.full_name || loginEmail.split("@")[0], email: loginEmail, id: data.user?.id, token: data.access_token });
+        setChatMessages([{ role: "assistant", content: t.chat.welcome }]);
+        setPage("chat");
+        showToast(lang === "ar" ? "أهلاً بك!" : lang === "fr" ? "Bienvenue!" : "Welcome!");
+      }
+    } catch { showToast(t.toast.error, "error"); }
+    setLoginLoading(false);
+  };
+
+  const handleRegister = async () => {
+    if (!loginFirst || !loginLast || !loginPhone || !loginEmail || !loginPass) { showToast(t.fillAll, "error"); return; }
+    // Basic validation
+    if (loginPass.length < 8) { showToast(lang === "ar" ? "كلمة المرور 8 أحرف على الأقل" : "Password must be 8+ chars", "error"); return; }
+    if (!/\S+@\S+\.\S+/.test(loginEmail)) { showToast(lang === "ar" ? "بريد إلكتروني غير صالح" : "Invalid email", "error"); return; }
+    setLoginLoading(true);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
+        body: JSON.stringify({ email: loginEmail, password: loginPass, data: { full_name: `${loginFirst} ${loginLast}`, phone: loginPhone } }),
+      });
+      const data = await res.json();
+      if (data.error) { showToast(data.error_description || t.toast.error, "error"); }
+      else { showToast(lang === "ar" ? "تحقق من بريدك الإلكتروني!" : lang === "fr" ? "Vérifiez votre email!" : "Check your email!"); setLoginMode("login"); }
+    } catch { showToast(t.toast.error, "error"); }
+    setLoginLoading(false);
+  };
+
   const handleDemoLogin = () => {
-    setUser({ name: lang === "ar" ? "مستخدم تجريبي" : lang === "fr" ? "Utilisateur Démo" : "Demo User", email: "demo@ibda3ai.com" });
+    setUser({ name: lang === "ar" ? "مستخدم تجريبي" : "Demo User", email: "demo@ibda3ai.com", id: "demo" });
+    setCredits(150);
     setChatMessages([{ role: "assistant", content: t.chat.welcome }]);
     setPage("chat");
   };
 
-  const handleLogout = () => { setUser(null); setPage("home"); };
+  const handleLogout = () => { setUser(null); setPage("home"); setCredits(50); };
 
-  // ── Open payment page ──────────────────────────────────────────────────────
-  const openPayment = (plan) => {
-    if (!user) { setPage("login"); return; }
-    if (plan.id === "free") { showToast(lang === "ar" ? "أنت على الخطة المجانية" : lang === "fr" ? "Vous êtes sur le plan gratuit" : "You're on the free plan"); return; }
-    if (plan.id === "ultra") { showToast(lang === "ar" ? "تواصل معنا عبر البريد" : lang === "fr" ? "Contactez-nous par email" : "Contact us via email"); return; }
-    setSelectedPlan(plan);
-    setPayTab("card");
-    setCardNum(""); setCardExp(""); setCardCvv(""); setCardName("");
-    setPage("payment");
-  };
-
-  // ── Simulate card payment → calls /api/youcanpay/checkout ─────────────────
-  const handleCardPay = async () => {
-    if (!cardNum || !cardExp || !cardCvv || !cardName) {
-      showToast(lang === "ar" ? "يرجى ملء جميع الحقول" : lang === "fr" ? "Veuillez remplir tous les champs" : "Please fill all fields", "error");
-      return;
-    }
-    setPayLoading(true);
-    // In production this POSTs to /api/youcanpay/checkout → returns checkout URL
-    // Here we simulate a 2s round-trip then success
-    await new Promise(r => setTimeout(r, 2000));
-    const cfg = PLAN_CONFIG[selectedPlan.id];
-    setCredits(c => c + cfg.credits);
-    showToast(t.pay.success);
-    setPayLoading(false);
-    setPage("pricing");
-  };
-
-  // ── Redirect to YouCan Pay hosted checkout ─────────────────────────────────
-  const handleYouCanRedirect = async () => {
-    setPayLoading(true);
-    showToast(t.pay.redirect);
-    // In production: POST /api/youcanpay/checkout → { checkout_url }
-    // Then: window.location.href = checkout_url
-    // Webhook at /api/youcanpay/webhook handles success and updates Supabase
-    await new Promise(r => setTimeout(r, 1500));
-    const checkoutUrl =
-      `${APP_URL}/api/youcanpay/checkout?plan=${selectedPlan.id}&user=${encodeURIComponent(user.email)}`;
-    // window.location.href = checkoutUrl; // Uncomment in production
-    alert(`[DEV] Would redirect to:\n${checkoutUrl}\n\nWebhook at: ${APP_URL}/api/youcanpay/webhook`);
-    setPayLoading(false);
-  };
-
-  // ── Format card number with spaces ────────────────────────────────────────
-  const formatCard = (v) => v.replace(/\D/g, "").slice(0, 16).replace(/(.{4})/g, "$1 ").trim();
-  const formatExp  = (v) => { const d = v.replace(/\D/g, "").slice(0, 4); return d.length > 2 ? d.slice(0,2) + " / " + d.slice(2) : d; };
-
-  // ── Chat ──────────────────────────────────────────────────────────────────
+  // ── Chat (secure: goes through /api/chat) ────────────────────────────────────
   const sendChat = async () => {
     if (!chatInput.trim() || chatLoading) return;
     const userMsg = { role: "user", content: chatInput };
@@ -409,83 +246,125 @@ export default function App() {
     setChatInput("");
     setChatLoading(true);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system: `You are a helpful AI assistant on a creative platform called Ibda3 AI. The platform supports Arabic, French, and English. Always respond in the same language the user writes in. Be concise, friendly, and helpful.`,
-          messages: msgs.map(m => ({ role: m.role, content: m.content })),
-        }),
+        headers: { "Content-Type": "application/json", ...(user?.token ? { "Authorization": `Bearer ${user.token}` } : {}) },
+        body: JSON.stringify({ messages: msgs.map(m => ({ role: m.role, content: m.content })), userId: user?.id || "demo" }),
       });
       const data = await res.json();
-      const reply = data.content?.[0]?.text || "...";
+      if (res.status === 402) { showToast(t.toast.noCredits, "error"); setChatLoading(false); return; }
+      const reply = data.content || t.toast.error;
       setChatMessages([...msgs, { role: "assistant", content: reply }]);
-    } catch {
-      showToast(t.toast.error, "error");
-    }
+      addHistory("chat", chatInput);
+    } catch { showToast(t.toast.error, "error"); }
     setChatLoading(false);
   };
 
-  // ── Image Generation ──────────────────────────────────────────────────────
+  // ── Image Generation (secure: goes through /api/generate-image) ──────────────
   const generateImage = async () => {
     if (!imagePrompt.trim() || imageLoading) return;
     if (credits < 10) { showToast(t.toast.noCredits, "error"); return; }
-    setImageLoading(true);
-    setGeneratedImage(null);
-    await new Promise(r => setTimeout(r, 2000));
-    const seed = encodeURIComponent(imagePrompt).slice(0, 10) + Date.now();
-    const imgUrl = `https://picsum.photos/seed/${seed}/600/400`;
-    setGeneratedImage(imgUrl);
-    setCredits(c => c - 10);
-    setGallery(g => [{ id: Date.now(), type: "image", url: imgUrl, prompt: imagePrompt, date: new Date().toLocaleDateString() }, ...g]);
-    showToast(t.toast.generated);
+    setImageLoading(true); setGeneratedImage(null);
+    try {
+      const res = await fetch("/api/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: imagePrompt, style: imageStyle, userId: user?.id || "demo" }),
+      });
+      const data = await res.json();
+      const imgUrl = data.url || `https://picsum.photos/seed/${Date.now()}/600/400`;
+      setGeneratedImage(imgUrl);
+      setCredits(c => c - 10);
+      setGallery(g => [{ id: Date.now(), type: "image", url: imgUrl, prompt: imagePrompt, date: new Date().toLocaleDateString() }, ...g]);
+      showToast(t.toast.generated);
+      addHistory("image", imagePrompt);
+    } catch { showToast(t.toast.error, "error"); }
     setImageLoading(false);
   };
 
-  // ── Video Generation ──────────────────────────────────────────────────────
+  // ── Video Generation (secure: goes through /api/generate-video) ──────────────
   const generateVideo = async () => {
     if (!videoPrompt.trim() || videoLoading) return;
-    if (credits < 50) { showToast(t.toast.noCredits, "error"); return; }
-    setVideoLoading(true);
-    setGeneratedVideo(null);
-    await new Promise(r => setTimeout(r, 3000));
-    const seed = Date.now();
-    const thumbUrl = `https://picsum.photos/seed/${seed}/600/338`;
-    setGeneratedVideo({ thumb: thumbUrl, prompt: videoPrompt });
-    setCredits(c => c - 50);
-    setGallery(g => [{ id: Date.now(), type: "video", url: thumbUrl, prompt: videoPrompt, date: new Date().toLocaleDateString() }, ...g]);
-    showToast(t.toast.generated);
+    const cost = videoMode === "text2video" ? 50 : videoMode === "img2video" ? 60 : videoMode === "effects" ? 40 : 70;
+    if (credits < cost) { showToast(t.toast.noCredits, "error"); return; }
+    setVideoLoading(true); setGeneratedVideo(null);
+    try {
+      const res = await fetch("/api/generate-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: videoPrompt, mode: videoMode, duration: videoDuration, aspect: videoAspect, resolution: videoResolution, userId: user?.id || "demo" }),
+      });
+      const data = await res.json();
+      const thumbUrl = data.thumbnail || `https://picsum.photos/seed/${Date.now()}/600/338`;
+      setGeneratedVideo({ thumb: thumbUrl, prompt: videoPrompt, mode: videoMode });
+      setCredits(c => c - cost);
+      setGallery(g => [{ id: Date.now(), type: "video", url: thumbUrl, prompt: videoPrompt, date: new Date().toLocaleDateString() }, ...g]);
+      showToast(t.toast.generated);
+      addHistory("video", videoPrompt);
+    } catch { showToast(t.toast.error, "error"); }
     setVideoLoading(false);
   };
 
-  // ─── Styles ────────────────────────────────────────────────────────────────
+  // ── Payment (secure: goes through /api/youcanpay/checkout) ──────────────────
+  const openPayment = (plan) => {
+    if (!user) { setPage("login"); return; }
+    if (plan.id === "free") { showToast(lang === "ar" ? "أنت على الخطة المجانية" : "You're on the free plan"); return; }
+    if (plan.id === "ultra") { showToast(lang === "ar" ? "تواصل معنا عبر البريد" : "Contact us via email"); return; }
+    setSelectedPlan(plan); setPage("payment");
+  };
+
+  const handleYouCanRedirect = async () => {
+    if (!selectedPlan || !user) return;
+    setPayLoading(true);
+    showToast(t.pay.redirect);
+    try {
+      const res = await fetch("/api/youcanpay/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ planId: selectedPlan.id, userId: user.id, email: user.email }),
+      });
+      const data = await res.json();
+      if (data.checkout_url) { window.location.href = data.checkout_url; }
+      else { showToast(t.pay.failed, "error"); }
+    } catch { showToast(t.pay.failed, "error"); }
+    setPayLoading(false);
+  };
+
+  const addHistory = (type, prompt) => {
+    setUsageHistory(h => [{ id: Date.now(), type, prompt: prompt.slice(0, 50), date: new Date().toLocaleDateString() }, ...h.slice(0, 19)]);
+  };
+
+  // ─── CSS ──────────────────────────────────────────────────────────────────────
   const styles = `
     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&family=Noto+Kufi+Arabic:wght@300;400;600;700;800&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg: #050508;
-      --surface: #0d0d14;
-      --surface2: #13131e;
-      --border: rgba(255,255,255,0.07);
-      --border2: rgba(255,255,255,0.12);
-      --accent: #7c5cfc;
-      --accent2: #c158f5;
-      --gold: #f0c040;
-      --text: #e8e8f0;
-      --muted: #7070a0;
-      --success: #4ade80;
-      --error: #f87171;
+      --bg: #050508; --surface: #0d0d14; --surface2: #13131e;
+      --border: rgba(255,255,255,0.07); --border2: rgba(255,255,255,0.12);
+      --accent: #7c5cfc; --accent2: #c158f5; --gold: #f0c040;
+      --text: #e8e8f0; --muted: #7070a0; --success: #4ade80; --error: #f87171;
       --font: ${lang === "ar" ? "'Noto Kufi Arabic'" : "'Sora'"}, sans-serif;
-      --radius: 16px;
-      --glow: 0 0 40px rgba(124,92,252,0.25);
+      --radius: 16px; --glow: 0 0 40px rgba(124,92,252,0.25);
     }
     html, body, #root { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); }
-    
     .app { min-height: 100vh; display: flex; flex-direction: column; }
-    
-    /* Navbar */
+
+    /* ── Animated background orbs ── */
+    .bg-orbs { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+    .orb {
+      position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.15;
+      animation: orbFloat 8s ease-in-out infinite;
+    }
+    .orb-1 { width: 600px; height: 600px; background: radial-gradient(circle, #7c5cfc, transparent); top: -200px; left: -200px; animation-delay: 0s; }
+    .orb-2 { width: 400px; height: 400px; background: radial-gradient(circle, #c158f5, transparent); bottom: -100px; right: -100px; animation-delay: 3s; }
+    .orb-3 { width: 300px; height: 300px; background: radial-gradient(circle, #f0c040, transparent); top: 40%; left: 60%; animation-delay: 5s; }
+    @keyframes orbFloat {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      33% { transform: translate(30px, -30px) scale(1.05); }
+      66% { transform: translate(-20px, 20px) scale(0.95); }
+    }
+
+    /* ── Navbar ── */
     .navbar {
       position: fixed; top: 0; left: 0; right: 0; z-index: 100;
       background: rgba(5,5,8,0.85); backdrop-filter: blur(20px);
@@ -494,69 +373,27 @@ export default function App() {
       padding: 0 24px; height: 64px; gap: 16px;
     }
     .nav-logo { display: flex; align-items: center; gap: 10px; cursor: pointer; }
-    .nav-logo-icon {
-      width: 36px; height: 36px; border-radius: 10px;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-      display: flex; align-items: center; justify-content: center;
-      font-size: 18px; box-shadow: var(--glow);
-    }
+    .nav-logo-icon { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: var(--glow); }
     .nav-logo-text { font-size: 18px; font-weight: 700; background: linear-gradient(135deg, #a78bfa, #e879f9); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
     .nav-links { display: flex; gap: 4px; }
-    .nav-link {
-      padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 13px;
-      color: var(--muted); transition: all 0.2s; border: none; background: none;
-      font-family: var(--font);
-    }
+    .nav-link { padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--muted); transition: all 0.2s; border: none; background: none; font-family: var(--font); }
     .nav-link:hover, .nav-link.active { color: var(--text); background: rgba(255,255,255,0.07); }
     .nav-right { display: flex; align-items: center; gap: 12px; }
-    .credits-badge {
-      display: flex; align-items: center; gap: 6px; padding: 5px 12px;
-      background: rgba(240,192,64,0.1); border: 1px solid rgba(240,192,64,0.25);
-      border-radius: 20px; font-size: 13px; font-weight: 600; color: var(--gold);
-    }
-    .lang-btn {
-      padding: 5px 10px; border-radius: 8px; border: 1px solid var(--border2);
-      background: var(--surface); color: var(--muted); cursor: pointer;
-      font-size: 12px; font-family: var(--font); transition: all 0.2s;
-    }
+    .credits-badge { display: flex; align-items: center; gap: 6px; padding: 5px 12px; background: rgba(240,192,64,0.1); border: 1px solid rgba(240,192,64,0.25); border-radius: 20px; font-size: 13px; font-weight: 600; color: var(--gold); }
+    .lang-btn { padding: 5px 10px; border-radius: 8px; border: 1px solid var(--border2); background: var(--surface); color: var(--muted); cursor: pointer; font-size: 12px; font-family: var(--font); transition: all 0.2s; }
     .lang-btn:hover { color: var(--text); border-color: var(--accent); }
     .btn-ghost { padding: 7px 16px; border-radius: 10px; border: 1px solid var(--border2); background: none; color: var(--text); cursor: pointer; font-family: var(--font); font-size: 13px; transition: all 0.2s; }
     .btn-ghost:hover { background: rgba(255,255,255,0.07); }
-    .btn-primary {
-      padding: 8px 20px; border-radius: 10px; border: none; cursor: pointer;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-      color: white; font-family: var(--font); font-size: 14px; font-weight: 600;
-      transition: all 0.2s; box-shadow: 0 0 20px rgba(124,92,252,0.3);
-    }
+    .btn-primary { padding: 8px 20px; border-radius: 10px; border: none; cursor: pointer; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; font-family: var(--font); font-size: 14px; font-weight: 600; transition: all 0.2s; box-shadow: 0 0 20px rgba(124,92,252,0.3); }
     .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 0 30px rgba(124,92,252,0.5); }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .main { flex: 1; padding-top: 64px; position: relative; z-index: 1; }
 
-    /* Main content */
-    .main { flex: 1; padding-top: 64px; }
-
-    /* Hero */
-    .hero {
-      min-height: calc(100vh - 64px); display: flex; flex-direction: column;
-      align-items: center; justify-content: center; text-align: center;
-      padding: 40px 24px; position: relative; overflow: hidden;
-    }
-    .hero-bg {
-      position: absolute; inset: 0; z-index: 0;
-      background: radial-gradient(ellipse 80% 60% at 50% 40%, rgba(124,92,252,0.12) 0%, transparent 60%),
-                  radial-gradient(ellipse 60% 40% at 80% 70%, rgba(193,88,245,0.08) 0%, transparent 50%);
-    }
-    .hero-grid {
-      position: absolute; inset: 0; z-index: 0; opacity: 0.03;
-      background-image: linear-gradient(var(--border2) 1px, transparent 1px), linear-gradient(90deg, var(--border2) 1px, transparent 1px);
-      background-size: 60px 60px;
-    }
+    /* ── Hero ── */
+    .hero { min-height: calc(100vh - 64px); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px 24px; position: relative; overflow: hidden; }
+    .hero-grid { position: absolute; inset: 0; z-index: 0; opacity: 0.03; background-image: linear-gradient(var(--border2) 1px, transparent 1px), linear-gradient(90deg, var(--border2) 1px, transparent 1px); background-size: 60px 60px; }
     .hero-content { position: relative; z-index: 1; max-width: 800px; }
-    .hero-badge {
-      display: inline-flex; align-items: center; gap: 8px; margin-bottom: 32px;
-      padding: 8px 18px; border-radius: 50px; border: 1px solid rgba(124,92,252,0.3);
-      background: rgba(124,92,252,0.1); font-size: 13px; color: #a78bfa;
-      animation: fadeUp 0.6s ease both;
-    }
+    .hero-badge { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 32px; padding: 8px 18px; border-radius: 50px; border: 1px solid rgba(124,92,252,0.3); background: rgba(124,92,252,0.1); font-size: 13px; color: #a78bfa; animation: fadeUp 0.6s ease both; }
     .hero-title { font-size: clamp(48px,8vw,96px); font-weight: 800; line-height: 1; margin-bottom: 8px; animation: fadeUp 0.6s 0.1s ease both; }
     .hero-title-grad { background: linear-gradient(135deg, #a78bfa, #e879f9, #f0c040); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
     .hero-subtitle { font-size: clamp(20px,3vw,32px); font-weight: 300; color: var(--muted); margin-bottom: 24px; animation: fadeUp 0.6s 0.2s ease both; }
@@ -568,28 +405,28 @@ export default function App() {
     .stat-num { font-size: 28px; font-weight: 800; background: linear-gradient(135deg, #a78bfa, #e879f9); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
     .stat-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
-    /* Features strip */
+    /* ── Upload badge on hero ── */
+    .hero-upload-hint { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; animation: fadeUp 0.6s 0.7s ease both; }
+    .upload-hint-btn { display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 12px; border: 1px dashed rgba(124,92,252,0.4); background: rgba(124,92,252,0.06); color: #a78bfa; font-size: 13px; cursor: pointer; transition: all 0.2s; font-family: var(--font); }
+    .upload-hint-btn:hover { background: rgba(124,92,252,0.12); border-color: var(--accent); }
+
+    /* ── Features ── */
     .features { display: flex; gap: 16px; padding: 20px 24px 40px; max-width: 1100px; margin: 0 auto; flex-wrap: wrap; }
-    .feature-card {
-      flex: 1; min-width: 200px; padding: 24px; border-radius: var(--radius);
-      background: var(--surface); border: 1px solid var(--border);
-      transition: all 0.3s;
-    }
+    .feature-card { flex: 1; min-width: 200px; padding: 24px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); transition: all 0.3s; }
     .feature-card:hover { border-color: var(--accent); transform: translateY(-4px); box-shadow: var(--glow); }
     .feature-icon { font-size: 32px; margin-bottom: 12px; }
     .feature-title { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
     .feature-desc { font-size: 13px; color: var(--muted); line-height: 1.6; }
 
-    /* Page container */
+    /* ── Page ── */
     .page { max-width: 900px; margin: 0 auto; padding: 40px 24px; }
     .page-title { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
     .page-sub { font-size: 14px; color: var(--muted); margin-bottom: 32px; }
 
-    /* Chat */
+    /* ── Chat ── */
     .chat-container { display: flex; flex-direction: column; height: calc(100vh - 180px); }
     .chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding: 16px; background: var(--surface); border-radius: var(--radius) var(--radius) 0 0; border: 1px solid var(--border); border-bottom: none; }
     .chat-messages::-webkit-scrollbar { width: 4px; }
-    .chat-messages::-webkit-scrollbar-track { background: transparent; }
     .chat-messages::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
     .msg { display: flex; gap: 12px; max-width: 80%; }
     .msg.user { align-self: flex-end; flex-direction: row-reverse; }
@@ -603,33 +440,17 @@ export default function App() {
     .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: bounce 1s infinite; }
     .dot:nth-child(2) { animation-delay: 0.15s; }
     .dot:nth-child(3) { animation-delay: 0.3s; }
-    .chat-input-area {
-      display: flex; gap: 10px; padding: 14px; background: var(--surface2);
-      border: 1px solid var(--border); border-radius: 0 0 var(--radius) var(--radius);
-    }
-    .chat-textarea {
-      flex: 1; background: rgba(255,255,255,0.04); border: 1px solid var(--border);
-      border-radius: 10px; padding: 10px 14px; color: var(--text); font-family: var(--font);
-      font-size: 14px; resize: none; outline: none; transition: border-color 0.2s; min-height: 44px; max-height: 120px;
-    }
+    .chat-input-area { display: flex; gap: 10px; padding: 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 0 0 var(--radius) var(--radius); }
+    .chat-textarea { flex: 1; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text); font-family: var(--font); font-size: 14px; resize: none; outline: none; transition: border-color 0.2s; min-height: 44px; max-height: 120px; }
     .chat-textarea:focus { border-color: var(--accent); }
 
-    /* Image/Video generator */
+    /* ── Gen box ── */
     .gen-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px; margin-bottom: 24px; }
     .gen-label { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
-    .gen-textarea {
-      width: 100%; min-height: 100px; background: rgba(255,255,255,0.04);
-      border: 1px solid var(--border); border-radius: 10px; padding: 14px;
-      color: var(--text); font-family: var(--font); font-size: 14px; resize: vertical;
-      outline: none; transition: border-color 0.2s; line-height: 1.6;
-    }
+    .gen-textarea { width: 100%; min-height: 100px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 10px; padding: 14px; color: var(--text); font-family: var(--font); font-size: 14px; resize: vertical; outline: none; transition: border-color 0.2s; line-height: 1.6; }
     .gen-textarea:focus { border-color: var(--accent); }
     .style-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
-    .style-pill {
-      padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border2);
-      background: none; color: var(--muted); cursor: pointer; font-size: 13px;
-      font-family: var(--font); transition: all 0.2s;
-    }
+    .style-pill { padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border2); background: none; color: var(--muted); cursor: pointer; font-size: 13px; font-family: var(--font); transition: all 0.2s; }
     .style-pill.active { background: rgba(124,92,252,0.2); border-color: var(--accent); color: #a78bfa; }
     .gen-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 20px; }
     .cost-label { font-size: 13px; color: var(--muted); }
@@ -637,12 +458,23 @@ export default function App() {
     .result-img { width: 100%; display: block; aspect-ratio: 3/2; object-fit: cover; }
     .result-footer { padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; }
     .result-prompt { font-size: 12px; color: var(--muted); flex: 1; }
+
+    /* ── Video mode tabs ── */
+    .video-mode-tabs { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
+    .video-mode-tab { display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 12px; border: 1px solid var(--border2); background: var(--surface); color: var(--muted); cursor: pointer; font-size: 13px; font-family: var(--font); transition: all 0.2s; }
+    .video-mode-tab:hover { border-color: var(--accent); color: var(--text); }
+    .video-mode-tab.active { background: rgba(124,92,252,0.15); border-color: var(--accent); color: #a78bfa; }
+    .video-mode-cost { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: rgba(124,92,252,0.2); color: #a78bfa; margin-left: 4px; }
+    .upload-zone { border: 2px dashed rgba(124,92,252,0.3); border-radius: 12px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.2s; margin-bottom: 16px; }
+    .upload-zone:hover { border-color: var(--accent); background: rgba(124,92,252,0.05); }
+    .upload-zone-icon { font-size: 28px; margin-bottom: 8px; }
+    .upload-zone-text { font-size: 13px; color: var(--muted); }
+    .video-options-row { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; }
+    .video-option-group { flex: 1; min-width: 120px; }
     .video-placeholder { aspect-ratio: 16/9; background: linear-gradient(135deg, #0d0d20, #1a0d30); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; position: relative; overflow: hidden; }
     .video-glow { position: absolute; inset: 0; background: radial-gradient(ellipse at center, rgba(124,92,252,0.1) 0%, transparent 70%); animation: pulse 2s infinite; }
-    .video-icon { font-size: 48px; z-index: 1; }
-    .video-label { font-size: 14px; color: var(--muted); z-index: 1; text-align: center; padding: 0 20px; }
 
-    /* Gallery */
+    /* ── Gallery ── */
     .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px,1fr)); gap: 16px; }
     .gallery-item { position: relative; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); cursor: pointer; }
     .gallery-item img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; transition: transform 0.3s; }
@@ -657,19 +489,12 @@ export default function App() {
     .empty-state { text-align: center; padding: 80px 20px; color: var(--muted); }
     .empty-icon { font-size: 48px; margin-bottom: 16px; }
 
-    /* Pricing */
+    /* ── Pricing ── */
     .pricing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr)); gap: 20px; margin-top: 40px; }
-    .plan-card {
-      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-      padding: 32px; position: relative; transition: all 0.3s;
-    }
+    .plan-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 32px; position: relative; transition: all 0.3s; }
     .plan-card:hover { transform: translateY(-6px); box-shadow: var(--glow); }
     .plan-card.popular { border-color: var(--accent); background: rgba(124,92,252,0.05); }
-    .popular-badge {
-      position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
-      padding: 4px 16px; border-radius: 20px; font-size: 11px; font-weight: 700;
-      background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; white-space: nowrap;
-    }
+    .popular-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); padding: 4px 16px; border-radius: 20px; font-size: 11px; font-weight: 700; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; white-space: nowrap; }
     .plan-name { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
     .plan-price { font-size: 36px; font-weight: 800; margin-bottom: 4px; }
     .plan-price span { font-size: 14px; font-weight: 400; color: var(--muted); }
@@ -682,196 +507,70 @@ export default function App() {
     .plan-cta.secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border2); }
     .plan-cta:hover { transform: translateY(-2px); }
 
-    /* Login */
+    /* ── Login ── */
     .login-page { min-height: calc(100vh - 64px); display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
-    .login-card { width: 100%; max-width: 420px; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 40px; }
+    .login-card { width: 100%; max-width: 440px; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 40px; }
     .login-logo { text-align: center; margin-bottom: 28px; }
     .login-logo-icon { width: 56px; height: 56px; border-radius: 16px; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; font-size: 28px; margin: 0 auto 12px; box-shadow: var(--glow); }
     .login-title { font-size: 22px; font-weight: 700; text-align: center; margin-bottom: 6px; }
     .login-sub { font-size: 13px; color: var(--muted); text-align: center; margin-bottom: 28px; }
-    .input-group { margin-bottom: 16px; }
+    .input-row { display: flex; gap: 12px; }
+    .input-group { margin-bottom: 14px; flex: 1; }
     .input-label { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; display: block; text-transform: uppercase; letter-spacing: 0.04em; }
-    .input-field {
-      width: 100%; padding: 11px 14px; background: rgba(255,255,255,0.04);
-      border: 1px solid var(--border); border-radius: 10px; color: var(--text);
-      font-family: var(--font); font-size: 14px; outline: none; transition: border-color 0.2s;
-    }
+    .input-field { width: 100%; padding: 11px 14px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-family: var(--font); font-size: 14px; outline: none; transition: border-color 0.2s; }
     .input-field:focus { border-color: var(--accent); }
-    .login-divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--muted); font-size: 12px; }
+    .login-divider { display: flex; align-items: center; gap: 12px; margin: 16px 0; color: var(--muted); font-size: 12px; }
     .login-divider::before, .login-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
     .btn-demo { width: 100%; padding: 11px; border-radius: 10px; border: 1px solid var(--border2); background: rgba(255,255,255,0.04); color: var(--text); font-family: var(--font); font-size: 14px; cursor: pointer; transition: all 0.2s; }
     .btn-demo:hover { background: rgba(255,255,255,0.08); }
-    .login-switch { text-align: center; margin-top: 20px; font-size: 13px; color: var(--muted); }
+    .login-switch { text-align: center; margin-top: 16px; font-size: 13px; color: var(--muted); }
     .login-switch a { color: #a78bfa; cursor: pointer; text-decoration: none; }
 
-    /* ── Payment Page ──────────────────────────────────────────────── */
-    .pay-page {
-      min-height: calc(100vh - 64px);
-      display: flex; align-items: flex-start; justify-content: center;
-      padding: 40px 24px; position: relative; overflow: hidden;
-    }
-    .pay-bg {
-      position: fixed; inset: 0; z-index: 0; pointer-events: none;
-      background: radial-gradient(ellipse 70% 50% at 30% 30%, rgba(124,92,252,0.08) 0%, transparent 60%),
-                  radial-gradient(ellipse 50% 40% at 80% 80%, rgba(193,88,245,0.06) 0%, transparent 50%);
-    }
-    .pay-layout {
-      position: relative; z-index: 1;
-      display: grid; grid-template-columns: 1fr 380px; gap: 28px;
-      width: 100%; max-width: 900px; align-items: start;
-    }
-    @media (max-width: 720px) { .pay-layout { grid-template-columns: 1fr; } .pay-summary { order: -1; } }
+    /* ── Profile ── */
+    .profile-header { display: flex; align-items: center; gap: 20px; padding: 32px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 24px; }
+    .profile-avatar { width: 72px; height: 72px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; font-size: 32px; flex-shrink: 0; box-shadow: var(--glow); }
+    .profile-name { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+    .profile-email { font-size: 13px; color: var(--muted); }
+    .profile-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+    .profile-stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; }
+    .profile-stat-num { font-size: 24px; font-weight: 800; background: linear-gradient(135deg, #a78bfa, #e879f9); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .profile-stat-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .history-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; }
+    .history-type { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+    .history-type-chat { background: rgba(124,92,252,0.2); }
+    .history-type-image { background: rgba(74,222,128,0.2); }
+    .history-type-video { background: rgba(248,113,113,0.2); }
+    .history-prompt { font-size: 13px; color: var(--text); flex: 1; }
+    .history-date { font-size: 11px; color: var(--muted); }
 
-    /* Left: form card */
-    .pay-card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 20px; padding: 32px; animation: fadeUp 0.5s ease both;
-    }
-    .pay-header { margin-bottom: 28px; }
-    .pay-back {
-      display: inline-flex; align-items: center; gap: 6px;
-      color: var(--muted); font-size: 13px; cursor: pointer;
-      background: none; border: none; font-family: var(--font);
-      margin-bottom: 20px; transition: color 0.2s; padding: 0;
-    }
-    .pay-back:hover { color: var(--text); }
+    /* ── Payment ── */
+    .pay-page { min-height: calc(100vh - 64px); display: flex; align-items: flex-start; justify-content: center; padding: 40px 24px; }
+    .pay-layout { display: grid; grid-template-columns: 1fr 340px; gap: 24px; max-width: 900px; width: 100%; }
+    .pay-card { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 32px; animation: fadeUp 0.5s ease both; }
     .pay-title { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
-    .pay-subtitle { font-size: 13px; color: var(--muted); }
-
-    /* Tabs */
-    .pay-tabs {
-      display: flex; gap: 4px; margin-bottom: 28px;
-      background: var(--surface2); border-radius: 12px; padding: 4px;
-    }
-    .pay-tab {
-      flex: 1; padding: 10px; border-radius: 9px; border: none; cursor: pointer;
-      font-family: var(--font); font-size: 13px; font-weight: 600; transition: all 0.2s;
-      background: none; color: var(--muted);
-    }
-    .pay-tab.active { background: var(--surface); color: var(--text); box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
-
-    /* Card form */
-    .pay-field { margin-bottom: 18px; }
-    .pay-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-    .pay-label { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 7px; display: block; text-transform: uppercase; letter-spacing: 0.05em; }
-    .pay-input {
-      width: 100%; padding: 12px 14px;
-      background: rgba(255,255,255,0.04); border: 1px solid var(--border);
-      border-radius: 11px; color: var(--text); font-family: var(--font);
-      font-size: 14px; outline: none; transition: border-color 0.2s;
-      letter-spacing: 0.03em;
-    }
-    .pay-input:focus { border-color: var(--accent); background: rgba(124,92,252,0.04); }
-    .pay-input::placeholder { color: var(--muted); letter-spacing: normal; }
-    .pay-input.card-num { letter-spacing: 0.15em; font-size: 16px; font-weight: 600; }
-
-    /* Card preview */
-    .card-preview {
-      width: 100%; aspect-ratio: 1.586; border-radius: 18px; margin-bottom: 24px;
-      background: linear-gradient(135deg, #1a0a3a 0%, #0d0d1f 40%, #1a0a3a 100%);
-      border: 1px solid rgba(124,92,252,0.25); position: relative; overflow: hidden;
-      padding: 22px 24px; display: flex; flex-direction: column; justify-content: space-between;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08);
-    }
-    .card-preview::before {
-      content: ''; position: absolute; top: -30%; right: -10%; width: 250px; height: 250px;
-      border-radius: 50%; background: radial-gradient(circle, rgba(124,92,252,0.15), transparent 70%);
-    }
-    .card-chip { width: 40px; height: 30px; border-radius: 6px; background: linear-gradient(135deg, #d4a843, #f0c040); }
-    .card-num-display { font-size: 18px; font-weight: 600; letter-spacing: 0.2em; color: rgba(255,255,255,0.9); font-family: 'Courier New', monospace; }
-    .card-bottom { display: flex; justify-content: space-between; align-items: flex-end; }
-    .card-label-sm { font-size: 9px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 3px; }
-    .card-value-sm { font-size: 13px; color: rgba(255,255,255,0.85); font-weight: 600; }
-    .card-brand { font-size: 22px; font-weight: 800; color: rgba(255,255,255,0.6); font-style: italic; }
-
-    /* YouCan Pay tab */
-    .youcan-panel {
-      display: flex; flex-direction: column; align-items: center;
-      text-align: center; padding: 20px 0;
-    }
-    .youcan-logo {
-      width: 80px; height: 80px; border-radius: 20px; margin-bottom: 20px;
-      background: linear-gradient(135deg, #ff6b35, #f7931e);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 36px; box-shadow: 0 8px 30px rgba(255,107,53,0.3);
-    }
-    .youcan-title { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
-    .youcan-desc { font-size: 14px; color: var(--muted); line-height: 1.7; margin-bottom: 28px; max-width: 300px; }
-    .youcan-features { display: flex; gap: 16px; margin-bottom: 28px; flex-wrap: wrap; justify-content: center; }
-    .youcan-feat {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 12px; color: var(--muted); padding: 6px 12px;
-      background: rgba(255,255,255,0.04); border: 1px solid var(--border);
-      border-radius: 20px;
-    }
-    .btn-youcan {
-      width: 100%; padding: 14px; border-radius: 12px; border: none; cursor: pointer;
-      background: linear-gradient(135deg, #ff6b35, #f7931e);
-      color: white; font-family: var(--font); font-size: 15px; font-weight: 700;
-      transition: all 0.2s; box-shadow: 0 8px 24px rgba(255,107,53,0.3);
-      display: flex; align-items: center; justify-content: center; gap: 8px;
-    }
-    .btn-youcan:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(255,107,53,0.4); }
-    .btn-youcan:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-
-    /* Pay button */
-    .btn-pay {
-      width: 100%; padding: 14px; border-radius: 12px; border: none; cursor: pointer;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-      color: white; font-family: var(--font); font-size: 15px; font-weight: 700;
-      transition: all 0.2s; box-shadow: 0 8px 24px rgba(124,92,252,0.3); margin-top: 8px;
-      display: flex; align-items: center; justify-content: center; gap: 8px;
-    }
-    .btn-pay:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(124,92,252,0.5); }
+    .pay-subtitle { font-size: 13px; color: var(--muted); margin-bottom: 28px; }
+    .btn-pay { width: 100%; padding: 14px; border-radius: 12px; border: none; cursor: pointer; background: linear-gradient(135deg, #ff6b35, #f7931e); color: white; font-family: var(--font); font-size: 15px; font-weight: 700; transition: all 0.2s; box-shadow: 0 8px 24px rgba(255,107,53,0.3); display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .btn-pay:hover { transform: translateY(-2px); }
     .btn-pay:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-
-    /* Security badge */
-    .secure-badge {
-      display: flex; align-items: center; justify-content: center; gap: 6px;
-      margin-top: 16px; font-size: 12px; color: var(--muted);
-    }
-    .secure-badge .lock { color: var(--success); }
-
-    /* Right: order summary */
-    .pay-summary {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 20px; padding: 28px; animation: fadeUp 0.5s 0.1s ease both;
-      position: sticky; top: 80px;
-    }
-    .summary-title { font-size: 14px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 20px; }
-    .summary-plan-name {
-      font-size: 24px; font-weight: 800; margin-bottom: 6px;
-      background: linear-gradient(135deg, #a78bfa, #e879f9); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    }
+    .pay-summary { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 28px; position: sticky; top: 80px; }
+    .summary-plan-name { font-size: 24px; font-weight: 800; margin-bottom: 6px; background: linear-gradient(135deg, #a78bfa, #e879f9); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
     .summary-rows { display: flex; flex-direction: column; gap: 12px; margin: 20px 0; }
     .summary-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
     .summary-row .label { color: var(--muted); }
     .summary-row .value { font-weight: 600; }
-    .summary-divider { height: 1px; background: var(--border); margin: 16px 0; }
     .summary-total { display: flex; justify-content: space-between; align-items: center; }
     .summary-total .label { font-size: 14px; font-weight: 600; }
     .summary-total .value { font-size: 26px; font-weight: 800; color: var(--gold); }
-    .summary-total .currency { font-size: 13px; font-weight: 400; color: var(--muted); margin-right: 4px; }
     .trust-badges { display: flex; flex-direction: column; gap: 10px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
     .trust-item { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
-    .trust-icon { width: 28px; height: 28px; border-radius: 8px; background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.2); display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
-    .test-hint {
-      margin-top: 20px; padding: 12px; border-radius: 10px;
-      background: rgba(240,192,64,0.08); border: 1px solid rgba(240,192,64,0.2);
-      font-size: 11px; color: var(--gold); text-align: center; line-height: 1.6;
-    }
+    .secure-badge { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 16px; font-size: 12px; color: var(--muted); }
 
-    /* Toast */
-    .toast {
-      position: fixed; bottom: 24px; right: 24px; z-index: 9999;
-      padding: 12px 20px; border-radius: 12px; font-size: 14px; font-weight: 500;
-      animation: slideIn 0.3s ease; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-      max-width: 300px;
-    }
+    /* ── Toast ── */
+    .toast { position: fixed; bottom: 24px; right: 24px; z-index: 9999; padding: 12px 20px; border-radius: 12px; font-size: 14px; font-weight: 500; animation: slideIn 0.3s ease; box-shadow: 0 8px 32px rgba(0,0,0,0.5); max-width: 300px; }
     .toast.success { background: rgba(74,222,128,0.15); border: 1px solid rgba(74,222,128,0.3); color: var(--success); }
     .toast.error { background: rgba(248,113,113,0.15); border: 1px solid rgba(248,113,113,0.3); color: var(--error); }
 
-    /* Keyframes */
+    /* ── Keyframes ── */
     @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes bounce { 0%,80%,100% { transform: scale(0); } 40% { transform: scale(1); } }
     @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
@@ -879,24 +578,24 @@ export default function App() {
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner { width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.2); border-top-color: white; border-radius: 50%; animation: spin 0.6s linear infinite; display: inline-block; vertical-align: middle; margin-right: 8px; }
 
+    select.input-field { appearance: none; cursor: pointer; }
     @media (max-width: 640px) {
       .nav-links { display: none; }
       .hero-stats { gap: 20px; }
       .pricing-grid { grid-template-columns: 1fr; }
       .pay-layout { grid-template-columns: 1fr; }
+      .profile-stats { grid-template-columns: 1fr 1fr; }
+      .input-row { flex-direction: column; gap: 0; }
     }
   `;
 
-  // ─── Render helpers ───────────────────────────────────────────────────────
+  // ─── Renders ──────────────────────────────────────────────────────────────────
   const renderHero = () => (
     <div className="hero">
-      <div className="hero-bg" />
       <div className="hero-grid" />
       <div className="hero-content">
         <div className="hero-badge">✨ {lang === "ar" ? "مدعوم بأحدث نماذج الذكاء الاصطناعي" : lang === "fr" ? "Propulsé par les derniers modèles IA" : "Powered by the latest AI models"}</div>
-        <h1 className="hero-title">
-          <span className="hero-title-grad">{t.hero.title}</span>
-        </h1>
+        <h1 className="hero-title"><span className="hero-title-grad">{t.hero.title}</span></h1>
         <p className="hero-subtitle">{t.hero.subtitle}</p>
         <p className="hero-desc">{t.hero.desc}</p>
         <div className="hero-btns">
@@ -907,25 +606,25 @@ export default function App() {
           {[["10K+", lang === "ar" ? "مستخدم" : lang === "fr" ? "Utilisateurs" : "Users"],
             ["1M+", lang === "ar" ? "صورة مولّدة" : lang === "fr" ? "Images générées" : "Images generated"],
             ["99%", lang === "ar" ? "رضا العملاء" : lang === "fr" ? "Satisfaction" : "Satisfaction"]
-          ].map(([n, l]) => (
-            <div className="stat" key={n}>
-              <div className="stat-num">{n}</div>
-              <div className="stat-label">{l}</div>
-            </div>
-          ))}
+          ].map(([n, l]) => <div className="stat" key={n}><div className="stat-num">{n}</div><div className="stat-label">{l}</div></div>)}
         </div>
       </div>
-      <div className="features" style={{ marginTop: 80 }}>
+      {/* Upload hint badges */}
+      <div className="hero-upload-hint">
+        <button className="upload-hint-btn" onClick={() => { setPage(user ? "images" : "login"); }}>
+          🖼️ {lang === "ar" ? "أضف صورة" : lang === "fr" ? "Ajouter une image" : "Add Image"}
+        </button>
+        <button className="upload-hint-btn" onClick={() => { setPage(user ? "video" : "login"); }}>
+          🎬 {lang === "ar" ? "أضف فيديو" : lang === "fr" ? "Ajouter une vidéo" : "Add Video"}
+        </button>
+      </div>
+      <div className="features" style={{ marginTop: 100 }}>
         {[["🗣️", t.nav.chat, lang === "ar" ? "محادثات ذكية مدعومة بـ Claude AI" : lang === "fr" ? "Conversations intelligentes avec Claude AI" : "Smart conversations powered by Claude AI"],
           ["🎨", t.nav.images, lang === "ar" ? "صور احترافية بالذكاء الاصطناعي" : lang === "fr" ? "Images professionnelles par IA" : "Professional AI-generated images"],
-          ["🎬", t.nav.video, lang === "ar" ? "فيديوهات إبداعية بضغطة زر" : lang === "fr" ? "Vidéos créatives en un clic" : "Creative videos at the click of a button"],
+          ["🎬", t.nav.video, lang === "ar" ? "4 أوضاع لتوليد الفيديو" : lang === "fr" ? "4 modes de génération vidéo" : "4 video generation modes"],
           ["💎", lang === "ar" ? "رصيد مرن" : lang === "fr" ? "Crédits flexibles" : "Flexible Credits", lang === "ar" ? "نظام رصيد يناسب كل الاحتياجات" : lang === "fr" ? "Système de crédits adapté à tous" : "Credit system for all needs"],
         ].map(([icon, title, desc]) => (
-          <div className="feature-card" key={title}>
-            <div className="feature-icon">{icon}</div>
-            <div className="feature-title">{title}</div>
-            <div className="feature-desc">{desc}</div>
-          </div>
+          <div className="feature-card" key={title}><div className="feature-icon">{icon}</div><div className="feature-title">{title}</div><div className="feature-desc">{desc}</div></div>
         ))}
       </div>
     </div>
@@ -942,28 +641,12 @@ export default function App() {
               <div className="msg-bubble" style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
             </div>
           ))}
-          {chatLoading && (
-            <div className="msg assistant">
-              <div className="msg-avatar">🤖</div>
-              <div className="msg-bubble msg-thinking">
-                <div className="dot" /><div className="dot" /><div className="dot" />
-              </div>
-            </div>
-          )}
+          {chatLoading && <div className="msg assistant"><div className="msg-avatar">🤖</div><div className="msg-bubble msg-thinking"><div className="dot" /><div className="dot" /><div className="dot" /></div></div>}
           <div ref={chatEndRef} />
         </div>
         <div className="chat-input-area">
-          <textarea
-            className="chat-textarea"
-            placeholder={t.chat.placeholder}
-            value={chatInput}
-            onChange={e => setChatInput(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
-            rows={1}
-          />
-          <button className="btn-primary" onClick={sendChat} disabled={chatLoading || !chatInput.trim()}>
-            {chatLoading ? <span className="spinner" /> : "↑"} {t.chat.send}
-          </button>
+          <textarea className="chat-textarea" placeholder={t.chat.placeholder} value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }} rows={1} />
+          <button className="btn-primary" onClick={sendChat} disabled={chatLoading || !chatInput.trim()}>{chatLoading ? <span className="spinner" /> : "↑"} {t.chat.send}</button>
           <button className="btn-ghost" onClick={() => setChatMessages([{ role: "assistant", content: t.chat.welcome }])}>{t.chat.clear}</button>
         </div>
       </div>
@@ -985,7 +668,16 @@ export default function App() {
             ))}
           </div>
         </div>
-        <div className="gen-footer" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 20 }}>
+        {/* Reference image upload */}
+        <div style={{ marginTop: 16 }}>
+          <div className="upload-zone" onClick={() => imageFileRef.current?.click()}>
+            <div className="upload-zone-icon">🖼️</div>
+            <div className="upload-zone-text">{imageFile ? `✅ ${imageFile.name}` : t.image.uploadLabel}</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>{t.image.uploadHint}</div>
+          </div>
+          <input ref={imageFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => setImageFile(e.target.files[0])} />
+        </div>
+        <div className="gen-footer">
           <span className="cost-label">💰 {t.image.cost} | {t.credits}: {credits}</span>
           <button className="btn-primary" onClick={generateImage} disabled={imageLoading || !imagePrompt.trim()}>
             {imageLoading ? <><span className="spinner" />{t.image.generating}</> : t.image.generate}
@@ -1006,61 +698,105 @@ export default function App() {
     </div>
   );
 
-  const renderVideo = () => (
-    <div className="page">
-      <h1 className="page-title">🎬 {t.video.title}</h1>
-      <p className="page-sub">{t.video.cost}</p>
-      <div className="gen-box">
-        <div className="gen-label">{lang === "ar" ? "وصف الفيديو" : lang === "fr" ? "Description" : "Prompt"}</div>
-        <textarea className="gen-textarea" placeholder={t.video.placeholder} value={videoPrompt} onChange={e => setVideoPrompt(e.target.value)} />
-        <div style={{ marginTop: 16 }}>
-          <div className="gen-label">{t.video.duration}</div>
-          <div className="style-pills">
-            {["5", "10", "15"].map(d => (
-              <button key={d} className={`style-pill ${videoDuration === d ? "active" : ""}`} onClick={() => setVideoDuration(d)}>{d}s</button>
-            ))}
+  const renderVideo = () => {
+    const modeCosts = { text2video: 50, img2video: 60, effects: 40, lipsync: 70 };
+    const cost = modeCosts[videoMode];
+    return (
+      <div className="page">
+        <h1 className="page-title">🎬 {t.video.title}</h1>
+        {/* Mode tabs */}
+        <div className="video-mode-tabs">
+          {Object.entries(t.video.modes).map(([key, label]) => (
+            <button key={key} className={`video-mode-tab ${videoMode === key ? "active" : ""}`} onClick={() => { setVideoMode(key); setVideoPrompt(""); setVideoFile(null); }}>
+              <span>{VIDEO_MODES[key].icon}</span>
+              <span>{label}</span>
+              <span className="video-mode-cost">{VIDEO_MODES[key][`cost${lang === "ar" ? "Ar" : lang === "fr" ? "Fr" : "En"}`]}</span>
+            </button>
+          ))}
+        </div>
+        <div className="gen-box">
+          {/* Upload zones for modes that need files */}
+          {(videoMode === "img2video") && (
+            <div style={{ marginBottom: 16 }}>
+              <div className="gen-label">{t.video.uploadImg}</div>
+              <div className="upload-zone" onClick={() => videoFileRef.current?.click()}>
+                <div className="upload-zone-icon">🖼️</div>
+                <div className="upload-zone-text">{videoFile ? `✅ ${videoFile.name}` : t.video.uploadImg}</div>
+              </div>
+              <input ref={videoFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => setVideoFile(e.target.files[0])} />
+            </div>
+          )}
+          {(videoMode === "effects") && (
+            <div style={{ marginBottom: 16 }}>
+              <div className="gen-label">{t.video.uploadVid}</div>
+              <div className="upload-zone" onClick={() => videoFileRef.current?.click()}>
+                <div className="upload-zone-icon">🎬</div>
+                <div className="upload-zone-text">{videoFile ? `✅ ${videoFile.name}` : t.video.uploadVid}</div>
+              </div>
+              <input ref={videoFileRef} type="file" accept="video/*" style={{ display: "none" }} onChange={e => setVideoFile(e.target.files[0])} />
+            </div>
+          )}
+          <div className="gen-label">{lang === "ar" ? "وصف الفيديو" : lang === "fr" ? "Description" : "Prompt"}</div>
+          <textarea className="gen-textarea" placeholder={t.video.placeholders[videoMode]} value={videoPrompt} onChange={e => setVideoPrompt(e.target.value)} />
+          {/* Options row */}
+          <div className="video-options-row">
+            <div className="video-option-group">
+              <div className="gen-label">{t.video.duration}</div>
+              <div className="style-pills">
+                {["5", "10", "15"].map(d => <button key={d} className={`style-pill ${videoDuration === d ? "active" : ""}`} onClick={() => setVideoDuration(d)}>{d}s</button>)}
+              </div>
+            </div>
+            <div className="video-option-group">
+              <div className="gen-label">{t.video.aspectRatio}</div>
+              <div className="style-pills">
+                {["16:9", "9:16", "1:1"].map(a => <button key={a} className={`style-pill ${videoAspect === a ? "active" : ""}`} onClick={() => setVideoAspect(a)}>{a}</button>)}
+              </div>
+            </div>
+            <div className="video-option-group">
+              <div className="gen-label">{t.video.resolution}</div>
+              <div className="style-pills">
+                {["480p", "720p", "1080p"].map(r => <button key={r} className={`style-pill ${videoResolution === r ? "active" : ""}`} onClick={() => setVideoResolution(r)}>{r}</button>)}
+              </div>
+            </div>
+          </div>
+          <div className="gen-footer">
+            <span className="cost-label">💰 {cost} {lang === "ar" ? "رصيد" : "credits"} | {t.credits}: {credits}</span>
+            <button className="btn-primary" onClick={generateVideo} disabled={videoLoading || !videoPrompt.trim()}>
+              {videoLoading ? <><span className="spinner" />{t.video.generating}</> : t.video.generate}
+            </button>
           </div>
         </div>
-        <div className="gen-footer" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 20 }}>
-          <span className="cost-label">💰 {t.video.cost} | {t.credits}: {credits}</span>
-          <button className="btn-primary" onClick={generateVideo} disabled={videoLoading || !videoPrompt.trim()}>
-            {videoLoading ? <><span className="spinner" />{t.video.generating}</> : t.video.generate}
-          </button>
-        </div>
+        {generatedVideo && (
+          <div className="result-box">
+            <div className="video-placeholder">
+              <div className="video-glow" />
+              <div style={{ fontSize: 48, zIndex: 1 }}>▶️</div>
+              <div style={{ fontSize: 14, color: "var(--muted)", zIndex: 1, textAlign: "center", padding: "0 20px" }}>
+                {lang === "ar" ? "تم توليد الفيديو بنجاح!" : lang === "fr" ? "Vidéo générée!" : "Video generated!"}
+              </div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", zIndex: 1 }}>{videoAspect} · {videoResolution} · {videoDuration}s</div>
+            </div>
+            <div className="result-footer">
+              <span className="result-prompt">🎬 {videoPrompt}</span>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>{t.video.modes[generatedVideo.mode]}</span>
+            </div>
+          </div>
+        )}
       </div>
-      {generatedVideo && (
-        <div className="result-box">
-          <div className="video-placeholder">
-            <div className="video-glow" />
-            <div className="video-icon">▶️</div>
-            <div className="video-label">{lang === "ar" ? "تم توليد الفيديو بنجاح!" : lang === "fr" ? "Vidéo générée avec succès!" : "Video generated successfully!"}</div>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>{videoPrompt}</div>
-          </div>
-          <img src={generatedVideo.thumb} alt="thumb" style={{ width: "100%", display: "block", maxHeight: 200, objectFit: "cover" }} />
-          <div className="result-footer">
-            <span className="result-prompt">🎬 {videoPrompt} · {videoDuration}s</span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+    );
+  };
 
   const renderGallery = () => (
     <div className="page">
       <h1 className="page-title">🖼️ {t.gallery.title}</h1>
       {gallery.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-icon">🎨</div>
-          <p>{t.gallery.empty}</p>
-        </div>
+        <div className="empty-state"><div className="empty-icon">🎨</div><p>{t.gallery.empty}</p></div>
       ) : (
         <div className="gallery-grid">
           {gallery.map(item => (
             <div key={item.id} className="gallery-item">
               <img src={item.url} alt={item.prompt} />
-              <div className={`gallery-type-badge ${item.type === "image" ? "badge-image" : "badge-video"}`}>
-                {item.type === "image" ? "🖼" : "🎬"}
-              </div>
+              <div className={`gallery-type-badge ${item.type === "image" ? "badge-image" : "badge-video"}`}>{item.type === "image" ? "🖼" : "🎬"}</div>
               <div className="gallery-overlay">
                 <div className="gallery-prompt">{item.prompt}</div>
                 <button className="btn-delete" onClick={() => setGallery(g => g.filter(x => x.id !== item.id))}>{t.gallery.delete}</button>
@@ -1079,257 +815,149 @@ export default function App() {
       <div className="pricing-grid">
         {t.pricing.plans.map(plan => (
           <div key={plan.id} className={`plan-card ${plan.popular ? "popular" : ""}`}>
-            {plan.popular && <div className="popular-badge">⭐ {lang === "ar" ? "الأكثر شعبية" : lang === "fr" ? "Le plus populaire" : "Most Popular"}</div>}
+            {plan.popular && <div className="popular-badge">⭐ {lang === "ar" ? "الأكثر شعبية" : lang === "fr" ? "Populaire" : "Most Popular"}</div>}
             <div className="plan-name">{plan.name}</div>
             <div className="plan-price">{plan.price}<span> {plan.currency}</span></div>
             <div className="plan-credits">💰 {plan.credits} {t.credits}</div>
-            <ul className="plan-features">
-              {plan.features.map(f => <li key={f}>{f}</li>)}
-            </ul>
-            <button
-              className={`plan-cta ${plan.popular ? "primary" : "secondary"}`}
-              onClick={() => openPayment(plan)}
-            >
-              {plan.cta}
-            </button>
+            <ul className="plan-features">{plan.features.map(f => <li key={f}>{f}</li>)}</ul>
+            <button className={`plan-cta ${plan.popular ? "primary" : "secondary"}`} onClick={() => openPayment(plan)}>{plan.cta}</button>
           </div>
         ))}
       </div>
     </div>
   );
 
-  // ── Payment Page ────────────────────────────────────────────────────────────
-  const renderPayment = () => {
-    if (!selectedPlan) { setPage("pricing"); return null; }
-    const cfg = PLAN_CONFIG[selectedPlan.id];
-    const displayNum = cardNum || "•••• •••• •••• ••••";
-    const displayExp = cardExp || "MM/YY";
-    const displayName = cardName || (lang === "ar" ? "الاسم الكامل" : lang === "fr" ? "Nom du titulaire" : "FULL NAME");
-
-    return (
-      <div className="pay-page">
-        <div className="pay-bg" />
-        <div className="pay-layout">
-
-          {/* ── Left: Payment Form ── */}
-          <div className="pay-card">
-            <div className="pay-header">
-              <button className="pay-back" onClick={() => setPage("pricing")}>
-                ← {t.pay.backToPricing}
-              </button>
-              <h1 className="pay-title">💳 {t.pay.title}</h1>
-              <p className="pay-subtitle">{t.pay.subtitle}</p>
+  const renderProfile = () => (
+    <div className="page">
+      <h1 className="page-title">👤 {t.profile.title}</h1>
+      <div className="profile-header">
+        <div className="profile-avatar">👤</div>
+        <div style={{ flex: 1 }}>
+          {editingName ? (
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input className="input-field" style={{ width: 200 }} value={newName} onChange={e => setNewName(e.target.value)} placeholder={user?.name} />
+              <button className="btn-primary" style={{ padding: "8px 16px", fontSize: 13 }} onClick={() => { setUser(u => ({ ...u, name: newName || u.name })); setEditingName(false); showToast(lang === "ar" ? "تم الحفظ" : "Saved"); }}>{t.profile.save}</button>
+              <button className="btn-ghost" style={{ padding: "8px 16px", fontSize: 13 }} onClick={() => setEditingName(false)}>✕</button>
             </div>
-
-            {/* Tabs */}
-            <div className="pay-tabs">
-              <button className={`pay-tab ${payTab === "card" ? "active" : ""}`} onClick={() => setPayTab("card")}>
-                💳 {lang === "ar" ? "بطاقة بنكية" : lang === "fr" ? "Carte bancaire" : "Credit Card"}
-              </button>
-              <button className={`pay-tab ${payTab === "youcan" ? "active" : ""}`} onClick={() => setPayTab("youcan")}>
-                🔶 YouCan Pay
-              </button>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div className="profile-name">{user?.name}</div>
+              <button className="btn-ghost" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => { setNewName(user?.name || ""); setEditingName(true); }}>✏️</button>
             </div>
-
-            {payTab === "card" && (
-              <>
-                {/* Card preview */}
-                <div className="card-preview">
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <div className="card-chip" />
-                    <div className="card-brand">VISA</div>
-                  </div>
-                  <div className="card-num-display">{displayNum}</div>
-                  <div className="card-bottom">
-                    <div>
-                      <div className="card-label-sm">{lang === "ar" ? "اسم الحامل" : lang === "fr" ? "Titulaire" : "CARD HOLDER"}</div>
-                      <div className="card-value-sm" style={{ textTransform: "uppercase" }}>{displayName}</div>
-                    </div>
-                    <div style={{ textAlign: isRTL ? "left" : "right" }}>
-                      <div className="card-label-sm">{lang === "ar" ? "تاريخ الانتهاء" : lang === "fr" ? "Expiration" : "EXPIRES"}</div>
-                      <div className="card-value-sm">{displayExp}</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Card number */}
-                <div className="pay-field">
-                  <label className="pay-label">{t.pay.cardNumber}</label>
-                  <input
-                    className="pay-input card-num"
-                    placeholder="4242 4242 4242 4242"
-                    value={cardNum}
-                    onChange={e => setCardNum(formatCard(e.target.value))}
-                    maxLength={19}
-                  />
-                </div>
-
-                {/* Cardholder */}
-                <div className="pay-field">
-                  <label className="pay-label">{t.pay.cardHolder}</label>
-                  <input
-                    className="pay-input"
-                    placeholder={lang === "ar" ? "محمد العربي" : lang === "fr" ? "Jean Dupont" : "John Doe"}
-                    value={cardName}
-                    onChange={e => setCardName(e.target.value)}
-                  />
-                </div>
-
-                {/* Expiry + CVV */}
-                <div className="pay-field-row">
-                  <div className="pay-field">
-                    <label className="pay-label">{t.pay.expiry}</label>
-                    <input
-                      className="pay-input"
-                      placeholder={t.pay.monthYear}
-                      value={cardExp}
-                      onChange={e => setCardExp(formatExp(e.target.value))}
-                      maxLength={7}
-                    />
-                  </div>
-                  <div className="pay-field">
-                    <label className="pay-label">{t.pay.cvv}</label>
-                    <input
-                      className="pay-input"
-                      placeholder="•••"
-                      type="password"
-                      value={cardCvv}
-                      onChange={e => setCardCvv(e.target.value.replace(/\D/g,"").slice(0,4))}
-                      maxLength={4}
-                    />
-                  </div>
-                </div>
-
-                <button className="btn-pay" onClick={handleCardPay} disabled={payLoading}>
-                  {payLoading
-                    ? <><span className="spinner" />{t.pay.processing}</>
-                    : <>🔒 {t.pay.payNow} — {cfg.price_mad} {t.pay.currency}</>
-                  }
-                </button>
-                <div className="secure-badge">
-                  <span className="lock">🔒</span>
-                  {t.pay.secureBadge}
-                </div>
-              </>
-            )}
-
-            {payTab === "youcan" && (
-              <div className="youcan-panel">
-                <div className="youcan-logo">🔶</div>
-                <div className="youcan-title">{t.pay.youcanTitle}</div>
-                <div className="youcan-desc">{t.pay.youcanDesc}</div>
-                <div className="youcan-features">
-                  <div className="youcan-feat">🛡️ {lang === "ar" ? "دفع آمن" : lang === "fr" ? "Paiement sécurisé" : "Secure"}</div>
-                  <div className="youcan-feat">⚡ {lang === "ar" ? "فوري" : lang === "fr" ? "Instantané" : "Instant"}</div>
-                  <div className="youcan-feat">🇲🇦 {lang === "ar" ? "درهم مغربي" : "MAD"}</div>
-                  <div className="youcan-feat">🔄 {lang === "ar" ? "استرداد سهل" : lang === "fr" ? "Remboursement" : "Refundable"}</div>
-                </div>
-                <button className="btn-youcan" onClick={handleYouCanRedirect} disabled={payLoading} style={{ maxWidth: 320 }}>
-                  {payLoading
-                    ? <><span className="spinner" />{t.pay.processing}</>
-                    : <>{t.pay.youcanBtn} →</>
-                  }
-                </button>
-                <div className="secure-badge" style={{ marginTop: 14 }}>
-                  <span>🌐</span>
-                  {lang === "ar"
-                    ? `سيتم تحويلك إلى: ${APP_URL}/api/youcanpay/checkout`
-                    : `Redirect to: ${APP_URL}/api/youcanpay/checkout`}
-                </div>
-              </div>
-            )}
+          )}
+          <div className="profile-email">{user?.email}</div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+            {t.profile.joined}: {new Date().toLocaleDateString()}
           </div>
-
-          {/* ── Right: Order Summary ── */}
-          <div className="pay-summary">
-            <div className="summary-title">
-              {t.pay.orderSummary}
-            </div>
-            <div className="summary-plan-name">{selectedPlan.name}</div>
-            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 4 }}>
-              {lang === "ar" ? "اشتراك شهري" : lang === "fr" ? "Abonnement mensuel" : "Monthly subscription"}
-            </div>
-
-            <div className="summary-rows">
-              <div className="summary-row">
-                <span className="label">{t.pay.plan}</span>
-                <span className="value">{selectedPlan.name}</span>
-              </div>
-              <div className="summary-row">
-                <span className="label">{t.pay.credits}</span>
-                <span className="value" style={{ color: "var(--accent)" }}>💰 {cfg.credits}</span>
-              </div>
-              <div className="summary-row">
-                <span className="label">{lang === "ar" ? "الفوترة" : lang === "fr" ? "Facturation" : "Billing"}</span>
-                <span className="value">{lang === "ar" ? "شهري" : lang === "fr" ? "Mensuelle" : "Monthly"}</span>
-              </div>
-            </div>
-
-            <div className="summary-divider" />
-
-            <div className="summary-total">
-              <span className="label">{t.pay.total}</span>
-              <span className="value">
-                <span className="currency">{t.pay.currency}</span>
-                {cfg.price_mad}
-              </span>
-            </div>
-
-            <div className="trust-badges">
-              <div className="trust-item">
-                <div className="trust-icon">✅</div>
-                <span>{t.pay.guarantee}</span>
-              </div>
-              <div className="trust-item">
-                <div className="trust-icon">💬</div>
-                <span>{t.pay.support}</span>
-              </div>
-              <div className="trust-item">
-                <div className="trust-icon">🔒</div>
-                <span>{t.pay.ssl}</span>
-              </div>
-              <div className="trust-item">
-                <div className="trust-icon">🔶</div>
-                <span>{lang === "ar" ? "مدعوم بـ YouCan Pay" : lang === "fr" ? "Propulsé par YouCan Pay" : "Powered by YouCan Pay"}</span>
-              </div>
-            </div>
-
-            <div className="test-hint">
-              🧪 {t.pay.testCard}
-              <br />
-              {lang === "ar" ? "CVV: أي 3 أرقام | الانتهاء: أي تاريخ مستقبلي" : lang === "fr" ? "CVV: 3 chiffres quelconques | Exp: toute date future" : "CVV: any 3 digits | Exp: any future date"}
-            </div>
-          </div>
-
         </div>
       </div>
-    );
-  };
+      <div className="profile-stats">
+        <div className="profile-stat"><div className="profile-stat-num">{credits}</div><div className="profile-stat-label">{t.profile.credits}</div></div>
+        <div className="profile-stat"><div className="profile-stat-num">{gallery.length}</div><div className="profile-stat-label">{lang === "ar" ? "أعمالي" : lang === "fr" ? "Créations" : "Creations"}</div></div>
+        <div className="profile-stat"><div className="profile-stat-num">{usageHistory.length}</div><div className="profile-stat-label">{lang === "ar" ? "طلبات" : lang === "fr" ? "Requêtes" : "Requests"}</div></div>
+      </div>
+      <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>📋 {t.profile.history}</h2>
+      {usageHistory.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 40, color: "var(--muted)" }}>{t.profile.noHistory}</div>
+      ) : (
+        usageHistory.map(h => (
+          <div key={h.id} className="history-item">
+            <div className={`history-type history-type-${h.type}`}>{h.type === "chat" ? "💬" : h.type === "image" ? "🎨" : "🎬"}</div>
+            <div className="history-prompt">{h.prompt}</div>
+            <div className="history-date">{h.date}</div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+
+  const renderPayment = () => (
+    <div className="pay-page">
+      <div className="pay-layout">
+        <div className="pay-card">
+          <button className="btn-ghost" style={{ marginBottom: 20, fontSize: 13 }} onClick={() => setPage("pricing")}>← {t.pay.backToPricing}</button>
+          <div className="pay-title">{t.pay.title}</div>
+          <div className="pay-subtitle">{t.pay.subtitle}</div>
+          <div style={{ padding: "24px", background: "rgba(255,107,53,0.05)", borderRadius: 16, border: "1px solid rgba(255,107,53,0.2)", marginBottom: 16 }}>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>🔒 YouCan Pay</div>
+            <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.7, marginBottom: 20 }}>
+              {lang === "ar" ? "سيتم تحويلك إلى بوابة الدفع الآمنة لإتمام المعاملة" : lang === "fr" ? "Vous serez redirigé vers la passerelle sécurisée" : "You will be redirected to the secure payment gateway"}
+            </div>
+            <button className="btn-pay" onClick={handleYouCanRedirect} disabled={payLoading}>
+              {payLoading ? <><span className="spinner" />{t.pay.processing}</> : <>{t.pay.youcanBtn} 🚀</>}
+            </button>
+          </div>
+          <div className="secure-badge">🔒 {t.pay.secureBadge}</div>
+        </div>
+        <div className="pay-summary">
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 16 }}>{t.pay.orderSummary}</div>
+          {selectedPlan && <>
+            <div className="summary-plan-name">{selectedPlan.name}</div>
+            <div className="summary-rows">
+              <div className="summary-row"><span className="label">{t.pay.plan}</span><span className="value">{selectedPlan.name}</span></div>
+              <div className="summary-row"><span className="label">{t.pay.credits}</span><span className="value">{selectedPlan.credits}</span></div>
+            </div>
+            <div style={{ height: 1, background: "var(--border)", margin: "16px 0" }} />
+            <div className="summary-total">
+              <span className="label">{t.pay.total}</span>
+              <span className="value">{selectedPlan.price} <span style={{ fontSize: 13, fontWeight: 400, color: "var(--muted)" }}>{t.pay.currency}</span></span>
+            </div>
+          </>}
+          <div className="trust-badges">
+            {[[t.pay.guarantee, "✅"], [t.pay.support, "🎧"], [t.pay.ssl, "🔐"]].map(([label, icon]) => (
+              <div key={label} className="trust-item"><span style={{ fontSize: 16 }}>{icon}</span>{label}</div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   const renderLogin = () => (
     <div className="login-page">
       <div className="login-card">
         <div className="login-logo">
           <div className="login-logo-icon">✨</div>
+          <div className="login-title">{loginMode === "login" ? t.loginTitle : t.registerBtn}</div>
+          <div className="login-sub">{t.loginSub}</div>
         </div>
-        <h2 className="login-title">{t.loginTitle}</h2>
-        <p className="login-sub">{t.loginSub}</p>
+        {loginMode === "register" && (
+          <div className="input-row">
+            <div className="input-group">
+              <label className="input-label">{t.firstName}</label>
+              <input className="input-field" placeholder={t.firstName} value={loginFirst} onChange={e => setLoginFirst(e.target.value)} />
+            </div>
+            <div className="input-group">
+              <label className="input-label">{t.lastName}</label>
+              <input className="input-field" placeholder={t.lastName} value={loginLast} onChange={e => setLoginLast(e.target.value)} />
+            </div>
+          </div>
+        )}
+        {loginMode === "register" && (
+          <div className="input-group">
+            <label className="input-label">{t.phone}</label>
+            <input className="input-field" type="tel" placeholder="+212 6XX XXX XXX" value={loginPhone} onChange={e => setLoginPhone(e.target.value)} />
+          </div>
+        )}
         <div className="input-group">
           <label className="input-label">{t.email}</label>
-          <input type="email" className="input-field" placeholder="you@example.com" />
+          <input className="input-field" type="email" placeholder="example@email.com" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} />
         </div>
         <div className="input-group">
           <label className="input-label">{t.password}</label>
-          <input type="password" className="input-field" placeholder="••••••••" />
+          <input className="input-field" type="password" placeholder="••••••••" value={loginPass} onChange={e => setLoginPass(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") loginMode === "login" ? handleLogin() : handleRegister(); }} />
         </div>
-        <button className="btn-primary" style={{ width: "100%", padding: 12, marginTop: 8, fontSize: 15 }} onClick={handleDemoLogin}>
+        <button className="btn-primary" style={{ width: "100%", padding: 12, marginTop: 4 }}
+          onClick={loginMode === "login" ? handleLogin : handleRegister} disabled={loginLoading}>
+          {loginLoading ? <span className="spinner" /> : null}
           {loginMode === "login" ? t.loginBtn : t.registerBtn}
         </button>
-        <div className="login-divider">{lang === "ar" ? "أو" : lang === "fr" ? "ou" : "or"}</div>
-        <button className="btn-demo" onClick={handleDemoLogin}>🚀 {t.demoLogin}</button>
+        <div className="login-divider">{lang === "ar" ? "أو" : "ou"}</div>
+        <button className="btn-demo" onClick={handleDemoLogin}>{t.demoLogin}</button>
         <div className="login-switch">
           {loginMode === "login" ? t.noAccount : t.hasAccount}{" "}
-          <a onClick={() => setLoginMode(m => m === "login" ? "register" : "login")}>
+          <a onClick={() => setLoginMode(loginMode === "login" ? "register" : "login")}>
             {loginMode === "login" ? t.registerBtn : t.loginBtn}
           </a>
         </div>
@@ -1337,60 +965,45 @@ export default function App() {
     </div>
   );
 
-  const pages = {
-    home: renderHero,
-    chat: renderChat,
-    images: renderImages,
-    video: renderVideo,
-    gallery: renderGallery,
-    pricing: renderPricing,
-    payment: renderPayment,
-    login: renderLogin,
-  };
+  // ─── Main render ──────────────────────────────────────────────────────────────
+  const pages = { home: renderHero, chat: renderChat, images: renderImages, video: renderVideo, gallery: renderGallery, pricing: renderPricing, payment: renderPayment, login: renderLogin, profile: renderProfile };
 
   return (
-    <>
+    <div className="app" dir={t.dir}>
       <style>{styles}</style>
-      <div className="app">
-        {/* Navbar */}
-        <nav className="navbar">
-          <div className="nav-logo" onClick={() => setPage("home")}>
-            <div className="nav-logo-icon">✨</div>
-            <span className="nav-logo-text">{t.name}</span>
-          </div>
-          <div className="nav-links">
-            {Object.entries(t.nav).map(([key, label]) => (
-              <button
-                key={key}
-                className={`nav-link ${page === key ? "active" : ""}`}
-                onClick={() => user || key === "pricing" ? setPage(key) : setPage("login")}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="nav-right">
-            {user && <div className="credits-badge">💰 {credits} {t.credits}</div>}
-            {["ar", "fr", "en"].map(l => (
-              <button key={l} className="lang-btn" onClick={() => setLang(l)} style={{ opacity: lang === l ? 1 : 0.5 }}>
-                {l === "ar" ? "عر" : l === "fr" ? "FR" : "EN"}
-              </button>
-            ))}
-            {user
-              ? <button className="btn-ghost" onClick={handleLogout}>{t.logout}</button>
-              : <button className="btn-primary" onClick={() => setPage("login")}>{t.login}</button>
-            }
-          </div>
-        </nav>
-
-        {/* Page */}
-        <main className="main">
-          {(pages[page] || pages.home)()}
-        </main>
-
-        {/* Toast */}
-        {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
+      {/* Animated background orbs */}
+      <div className="bg-orbs">
+        <div className="orb orb-1" />
+        <div className="orb orb-2" />
+        <div className="orb orb-3" />
       </div>
-    </>
+      {/* Navbar */}
+      <nav className="navbar">
+        <div className="nav-logo" onClick={() => setPage("home")}>
+          <div className="nav-logo-icon">✨</div>
+          <div className="nav-logo-text">{t.name}</div>
+        </div>
+        <div className="nav-links">
+          {(user ? ["chat","images","video","gallery","pricing","profile"] : ["pricing"]).map(p => (
+            <button key={p} className={`nav-link ${page === p ? "active" : ""}`} onClick={() => setPage(p)}>{t.nav[p]}</button>
+          ))}
+        </div>
+        <div className="nav-right">
+          {user && <div className="credits-badge">💰 {credits}</div>}
+          {["ar","fr","en"].map(l => <button key={l} className="lang-btn" onClick={() => setLang(l)}>{l.toUpperCase()}</button>)}
+          {user ? (
+            <button className="btn-ghost" onClick={handleLogout}>{t.logout}</button>
+          ) : (
+            <button className="btn-primary" onClick={() => setPage("login")}>{t.login}</button>
+          )}
+        </div>
+      </nav>
+      {/* Main content */}
+      <main className="main">
+        {(pages[page] || renderHero)()}
+      </main>
+      {/* Toast */}
+      {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
+    </div>
   );
 }
