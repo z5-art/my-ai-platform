@@ -3,9 +3,10 @@ import { useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  'https://uiehcsmidizvmebkypgg.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpZWhjc21sZGl6dm1lYmt5cGdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ4OTI0MDgsImV4cCI6MjA2MDQ2ODQwOH0'
 )
+
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
