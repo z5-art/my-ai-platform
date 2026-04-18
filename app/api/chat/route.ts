@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
-import { checkAndDeductCredits } from '@/lib/token-guard'
+import { checkAndDeductCredits, saveChatMessage } from '@/lib/token-guard'
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY
@@ -10,31 +10,32 @@ export async function POST(req: NextRequest) {
   try {
     const { messages, userId } = await req.json()
 
-    // التحقق من الرصيد
-    const check = await checkAndDeductCredits(userId, 1)
+    if (!messages || !userId) {
+      return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
+    }
+
+    // Check & deduct 1 credit
+    const check = await checkAndDeductCredits(userId, 1, 'chat', messages[messages.length - 1]?.content)
     if (!check.success) {
-      return NextResponse.json(
-        { error: 'رصيدك غير كافٍ' },
-        { status: 402 }
-      )
+      return NextResponse.json({ error: check.message }, { status: 402 })
     }
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1000,
-      messages
+      system: 'You are a helpful AI assistant on a creative platform called Ibda3 AI. Always respond in the same language the user writes in.',
+      messages,
     })
 
-    return NextResponse.json({
-      content: response.content[0].type === 'text'
-        ? response.content[0].text
-        : ''
-    })
+    const reply = response.content[0].type === 'text' ? response.content[0].text : ''
+
+    // Save to chat history
+    await saveChatMessage(userId, 'assistant', reply)
+
+    return NextResponse.json({ content: reply, balance: check.balance })
 
   } catch (error) {
-    return NextResponse.json(
-      { error: 'حدث خطأ' },
-      { status: 500 }
-    )
+    console.error('Chat error:', error)
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }

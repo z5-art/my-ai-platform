@@ -7,41 +7,84 @@ const supabase = createClient(
 
 export async function checkAndDeductCredits(
   userId: string,
-  cost: number
+  cost: number,
+  toolName: string,
+  prompt?: string
 ) {
-  // تحقق من الرصيد
-  const { data: profile, error } = await supabase
+  // Demo user — skip DB check
+  if (userId === 'demo') {
+    return { success: true, balance: 999 }
+  }
+
+  const { data, error } = await supabase.rpc('deduct_credits', {
+    p_user_id: userId,
+    p_amount:  cost,
+    p_tool:    toolName,
+    p_prompt:  prompt || null,
+  })
+
+  if (error) {
+    console.error('deduct_credits error:', error)
+    return { success: false, message: 'Database error' }
+  }
+
+  if (!data.success) {
+    return {
+      success: false,
+      message: data.error === 'insufficient_credits'
+        ? 'رصيدك غير كافٍ'
+        : 'User not found',
+      balance: data.balance,
+    }
+  }
+
+  return { success: true, balance: data.balance }
+}
+
+export async function getUserCredits(userId: string): Promise<number> {
+  if (userId === 'demo') return 999
+
+  const { data, error } = await supabase
     .from('profiles')
     .select('credits')
     .eq('id', userId)
     .single()
 
-  if (error || !profile) {
-    return { success: false, message: 'المستخدم غير موجود' }
+  if (error || !data) return 0
+  return data.credits ?? 0
+}
+
+export async function saveToGallery(
+  userId: string,
+  item: {
+    type: 'image' | 'video'
+    url: string
+    prompt: string
+    mode?: string
+    style?: string
+    duration?: string
+    resolution?: string
+    aspect_ratio?: string
+    credits_used?: number
   }
+) {
+  if (userId === 'demo') return { success: true }
 
-  if (profile.credits < cost) {
-    return { success: false, message: 'رصيد غير كافٍ' }
-  }
+  const { error } = await supabase
+    .from('gallery')
+    .insert({ user_id: userId, ...item })
 
-  // خصم الرصيد
-  const { error: deductError } = await supabase
-    .from('profiles')
-    .update({ credits: profile.credits - cost })
-    .eq('id', userId)
+  return { success: !error }
+}
 
-  if (deductError) {
-    return { success: false, message: 'خطأ في خصم الرصيد' }
-  }
+export async function saveChatMessage(
+  userId: string,
+  role: 'user' | 'assistant',
+  content: string
+) {
+  if (userId === 'demo') return
 
-  // تسجيل العملية
   await supabase
-    .from('usage')
-    .insert({
-      user_id: userId,
-      tool_name: 'chat',
-      created_at: new Date().toISOString()
-    })
-
-  return { success: true }
+    .from('chat_history')
+    .insert({ user_id: userId, role, content })
 }
