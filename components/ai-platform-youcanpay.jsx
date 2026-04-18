@@ -2,15 +2,53 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── Security: All sensitive keys are server-side only ────────────────────────
-// ANTHROPIC_API_KEY, YOUCAN_PAY_PRIVATE_KEY, SUPABASE_SERVICE_ROLE_KEY
+// STORAGE_SUPABASE_SERVICE_ROLE_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY
 // are NEVER exposed in client code — all API calls go through /api/* routes
 
-// ─── متغيرات البيئة — تتوافق مع Vercel + Supabase Integration ───────────────
-// في Vercel تُضاف تلقائياً: STORAGE_SUPABASE_URL و STORAGE_SUPABASE_ANON_KEY
-// الكود يدعم المتغيرَين: القديم STORAGE_... والجديد NEXT_PUBLIC_...
-const APP_URL      = process.env.NEXT_PUBLIC_APP_URL      || "";
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.STORAGE_SUPABASE_URL || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.STORAGE_SUPABASE_ANON_KEY || "";
+// ─── متغيرات البيئة — مطابقة تماماً لما هو موجود في Vercel ──────────────────
+// المتغيرات المتاحة في Vercel (من الصور):
+//   NEXT_PUBLIC_STORAGE_SUPABASE_URL              ← رابط Supabase العام
+//   NEXT_PUBLIC_STORAGE_SUPABASE_ANON_KEY         ← مفتاح Supabase العام
+//   NEXT_PUBLIC_STORAGE_SUPABASE_PUBLISHABLE_KEY  ← مفتاح النشر
+//   STORAGE_SUPABASE_SERVICE_ROLE_KEY             ← server فقط (سري)
+//   KLING_ACCESS_KEY                              ← توليد الفيديو (server)
+//   KLING_SECRET_KEY                              ← توليد الفيديو (server)
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "";
+
+// Supabase URL — NEXT_PUBLIC_STORAGE_SUPABASE_URL هو الاسم الصحيح في Vercel
+const SUPABASE_URL =
+  process.env.NEXT_PUBLIC_STORAGE_SUPABASE_URL ||
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  "";
+
+// Supabase Anon Key — NEXT_PUBLIC_STORAGE_SUPABASE_ANON_KEY هو الاسم الصحيح
+const SUPABASE_ANON_KEY =
+  process.env.NEXT_PUBLIC_STORAGE_SUPABASE_ANON_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  "";
+
+// Publishable Key — متوفر في Vercel كـ NEXT_PUBLIC_STORAGE_SUPABASE_PUBLISHABLE_KEY
+const SUPABASE_PUBLISHABLE_KEY =
+  process.env.NEXT_PUBLIC_STORAGE_SUPABASE_PUBLISHABLE_KEY || "";
+
+// ─── Helper: رؤوس الطلبات لـ Supabase REST API ────────────────────────────────
+// يجمع كل المفاتيح المطلوبة في مكان واحد
+const supabaseHeaders = (accessToken = null) => ({
+  "Content-Type": "application/json",
+  "apikey": SUPABASE_ANON_KEY,
+  "Authorization": `Bearer ${accessToken || SUPABASE_ANON_KEY}`,
+  ...(SUPABASE_PUBLISHABLE_KEY ? { "x-client-info": SUPABASE_PUBLISHABLE_KEY } : {}),
+});
+
+// ─── Helper: جلب البيانات من Supabase REST API ────────────────────────────────
+const supabaseFetch = async (path, options = {}, accessToken = null) => {
+  const res = await fetch(`${SUPABASE_URL}${path}`, {
+    ...options,
+    headers: { ...supabaseHeaders(accessToken), ...(options.headers || {}) },
+  });
+  return res.json();
+};
 
 // ─── Plan config ──────────────────────────────────────────────────────────────
 const PLAN_CONFIG = {
@@ -185,25 +223,51 @@ export default function App() {
     if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
+  // مزامنة الرصيد عند تغيير المستخدم (تسجيل الدخول)
+  useEffect(() => {
+    if (user?.id && user.id !== "demo") syncCreditsFromDB();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
   const showToast = useCallback((msg, type = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
   }, []);
 
-  // ── Supabase Auth ────────────────────────────────────────────────────────────
+  // ── Supabase Auth ─────────────────────────────────────────────────────────────
+  // يستخدم: NEXT_PUBLIC_STORAGE_SUPABASE_URL + NEXT_PUBLIC_STORAGE_SUPABASE_ANON_KEY
   const handleLogin = async () => {
     if (!loginEmail || !loginPass) { showToast(t.fillAll, "error"); return; }
     setLoginLoading(true);
     try {
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+      const data = await supabaseFetch("/auth/v1/token?grant_type=password", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
         body: JSON.stringify({ email: loginEmail, password: loginPass }),
       });
-      const data = await res.json();
-      if (data.error) { showToast(data.error_description || t.toast.error, "error"); }
-      else {
-        setUser({ name: data.user?.user_metadata?.full_name || loginEmail.split("@")[0], email: loginEmail, id: data.user?.id, token: data.access_token });
+      if (data.error) {
+        showToast(data.error_description || t.toast.error, "error");
+      } else {
+        const token = data.access_token;
+        // جلب بيانات الملف الشخصي من جدول profiles
+        let profileData = null;
+        try {
+          const pRes = await supabaseFetch(
+            `/rest/v1/profiles?id=eq.${data.user?.id}&select=credits,plan,full_name`,
+            { method: "GET" },
+            token
+          );
+          profileData = Array.isArray(pRes) ? pRes[0] : null;
+        } catch (_) {}
+
+        setUser({
+          name: profileData?.full_name || data.user?.user_metadata?.full_name || loginEmail.split("@")[0],
+          email: loginEmail,
+          id: data.user?.id,
+          token,
+          plan: profileData?.plan || "free",
+        });
+        // تحديث الرصيد من قاعدة البيانات
+        if (profileData?.credits != null) setCredits(profileData.credits);
         setChatMessages([{ role: "assistant", content: t.chat.welcome }]);
         setPage("chat");
         showToast(lang === "ar" ? "أهلاً بك!" : lang === "fr" ? "Bienvenue!" : "Welcome!");
@@ -214,19 +278,24 @@ export default function App() {
 
   const handleRegister = async () => {
     if (!loginFirst || !loginLast || !loginPhone || !loginEmail || !loginPass) { showToast(t.fillAll, "error"); return; }
-    // Basic validation
     if (loginPass.length < 8) { showToast(lang === "ar" ? "كلمة المرور 8 أحرف على الأقل" : "Password must be 8+ chars", "error"); return; }
     if (!/\S+@\S+\.\S+/.test(loginEmail)) { showToast(lang === "ar" ? "بريد إلكتروني غير صالح" : "Invalid email", "error"); return; }
     setLoginLoading(true);
     try {
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+      const data = await supabaseFetch("/auth/v1/signup", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
-        body: JSON.stringify({ email: loginEmail, password: loginPass, data: { full_name: `${loginFirst} ${loginLast}`, phone: loginPhone } }),
+        body: JSON.stringify({
+          email: loginEmail,
+          password: loginPass,
+          data: { full_name: `${loginFirst} ${loginLast}`, phone: loginPhone },
+        }),
       });
-      const data = await res.json();
-      if (data.error) { showToast(data.error_description || t.toast.error, "error"); }
-      else { showToast(lang === "ar" ? "تحقق من بريدك الإلكتروني!" : lang === "fr" ? "Vérifiez votre email!" : "Check your email!"); setLoginMode("login"); }
+      if (data.error) {
+        showToast(data.error_description || t.toast.error, "error");
+      } else {
+        showToast(lang === "ar" ? "تحقق من بريدك الإلكتروني!" : lang === "fr" ? "Vérifiez votre email!" : "Check your email!");
+        setLoginMode("login");
+      }
     } catch { showToast(t.toast.error, "error"); }
     setLoginLoading(false);
   };
@@ -238,7 +307,15 @@ export default function App() {
     setPage("chat");
   };
 
-  const handleLogout = () => { setUser(null); setPage("home"); setCredits(50); };
+  const handleLogout = async () => {
+    // تسجيل الخروج من Supabase
+    if (user?.token) {
+      try {
+        await supabaseFetch("/auth/v1/logout", { method: "POST" }, user.token);
+      } catch (_) {}
+    }
+    setUser(null); setPage("home"); setCredits(50); setChatMessages([]);
+  };
 
   // ── Chat (secure: goes through /api/chat) ────────────────────────────────────
   const sendChat = async () => {
@@ -249,10 +326,17 @@ export default function App() {
     setChatInput("");
     setChatLoading(true);
     try {
+      // يمرر token المستخدم و userId للـ API route التي تتحقق من الرصيد
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...(user?.token ? { "Authorization": `Bearer ${user.token}` } : {}) },
-        body: JSON.stringify({ messages: msgs.map(m => ({ role: m.role, content: m.content })), userId: user?.id || "demo" }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(user?.token ? { "Authorization": `Bearer ${user.token}` } : {}),
+        },
+        body: JSON.stringify({
+          messages: msgs.map(m => ({ role: m.role, content: m.content })),
+          userId: user?.id || "demo",
+        }),
       });
       const data = await res.json();
       if (res.status === 402) { showToast(t.toast.noCredits, "error"); setChatLoading(false); return; }
@@ -269,9 +353,13 @@ export default function App() {
     if (credits < 10) { showToast(t.toast.noCredits, "error"); return; }
     setImageLoading(true); setGeneratedImage(null);
     try {
+      // يمرر token المستخدم للـ API route (تُخزَّن الصورة في جدول gallery بـ Supabase)
       const res = await fetch("/api/generate-image", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(user?.token ? { "Authorization": `Bearer ${user.token}` } : {}),
+        },
         body: JSON.stringify({ prompt: imagePrompt, style: imageStyle, userId: user?.id || "demo" }),
       });
       const data = await res.json();
@@ -281,6 +369,7 @@ export default function App() {
       setGallery(g => [{ id: Date.now(), type: "image", url: imgUrl, prompt: imagePrompt, date: new Date().toLocaleDateString() }, ...g]);
       showToast(t.toast.generated);
       addHistory("image", imagePrompt);
+      await syncCreditsFromDB(); // تحديث الرصيد من Supabase
     } catch { showToast(t.toast.error, "error"); }
     setImageLoading(false);
   };
@@ -292,10 +381,21 @@ export default function App() {
     if (credits < cost) { showToast(t.toast.noCredits, "error"); return; }
     setVideoLoading(true); setGeneratedVideo(null);
     try {
+      // يمرر token المستخدم + إعدادات Kling للـ API route
       const res = await fetch("/api/generate-video", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: videoPrompt, mode: videoMode, duration: videoDuration, aspect: videoAspect, resolution: videoResolution, userId: user?.id || "demo" }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(user?.token ? { "Authorization": `Bearer ${user.token}` } : {}),
+        },
+        body: JSON.stringify({
+          prompt: videoPrompt,
+          mode: videoMode,
+          duration: videoDuration,
+          aspect: videoAspect,
+          resolution: videoResolution,
+          userId: user?.id || "demo",
+        }),
       });
       const data = await res.json();
       const thumbUrl = data.thumbnail || `https://picsum.photos/seed/${Date.now()}/600/338`;
@@ -304,6 +404,7 @@ export default function App() {
       setGallery(g => [{ id: Date.now(), type: "video", url: thumbUrl, prompt: videoPrompt, date: new Date().toLocaleDateString() }, ...g]);
       showToast(t.toast.generated);
       addHistory("video", videoPrompt);
+      await syncCreditsFromDB(); // تحديث الرصيد من Supabase
     } catch { showToast(t.toast.error, "error"); }
     setVideoLoading(false);
   };
@@ -335,6 +436,22 @@ export default function App() {
 
   const addHistory = (type, prompt) => {
     setUsageHistory(h => [{ id: Date.now(), type, prompt: prompt.slice(0, 50), date: new Date().toLocaleDateString() }, ...h.slice(0, 19)]);
+  };
+
+  // ── مزامنة الرصيد مع Supabase بعد كل عملية ───────────────────────────────────
+  // يستخدم NEXT_PUBLIC_STORAGE_SUPABASE_URL + token المستخدم
+  const syncCreditsFromDB = async () => {
+    if (!user?.id || user.id === "demo" || !user?.token) return;
+    try {
+      const data = await supabaseFetch(
+        `/rest/v1/profiles?id=eq.${user.id}&select=credits`,
+        { method: "GET" },
+        user.token
+      );
+      if (Array.isArray(data) && data[0]?.credits != null) {
+        setCredits(data[0].credits);
+      }
+    } catch (_) {}
   };
 
   // ─── CSS ──────────────────────────────────────────────────────────────────────
