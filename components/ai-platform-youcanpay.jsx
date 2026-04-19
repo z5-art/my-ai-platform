@@ -1,805 +1,778 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createClient } from "@supabase/supabase-js";
 
-// ─── Security: All sensitive keys are server-side only ────────────────────────
-// ANTHROPIC_API_KEY, YOUCAN_PAY_PRIVATE_KEY, SUPABASE_SERVICE_ROLE_KEY
-// are NEVER exposed in client code — all API calls go through /api/* routes
+// ── Supabase client (uses Vercel Storage env vars automatically) ──────────────
+const SUPA_URL =
+  process.env.NEXT_PUBLIC_STORAGE_SUPABASE_URL ||
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const SUPA_ANON =
+  process.env.NEXT_PUBLIC_STORAGE_SUPABASE_ANON_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "";
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const sb = SUPA_URL && SUPA_ANON ? createClient(SUPA_URL, SUPA_ANON) : null;
 
-// ─── Plan config ──────────────────────────────────────────────────────────────
-const PLAN_CONFIG = {
-  free:  { credits: 50,   price_mad: 0,   price_label: "0 درهم" },
-  pro:   { credits: 500,  price_mad: 99,  price_label: "99 درهم" },
-  ultra: { credits: 2000, price_mad: 299, price_label: "299 درهم" },
+// ── Plan config ───────────────────────────────────────────────────────────────
+const PLANS = {
+  free:  { credits: 50,   price: 0,   label: "0 MAD" },
+  pro:   { credits: 500,  price: 99,  label: "99 MAD" },
+  ultra: { credits: 2000, price: 299, label: "299 MAD" },
 };
 
-// ─── Video modes ──────────────────────────────────────────────────────────────
-const VIDEO_MODES = {
-  text2video: { icon: "✍️", costAr: "50 رصيد", costFr: "50 crédits", costEn: "50 credits" },
-  img2video:  { icon: "🖼️", costAr: "60 رصيد", costFr: "60 crédits", costEn: "60 credits" },
-  effects:    { icon: "✨", costAr: "40 رصيد", costFr: "40 crédits", costEn: "40 credits" },
-  lipsync:    { icon: "🎤", costAr: "70 رصيد", costFr: "70 crédits", costEn: "70 credits" },
-};
+const VIDEO_COSTS = { text2video: 50, img2video: 60, effects: 40, lipsync: 70 };
 
-// ─── Translations ─────────────────────────────────────────────────────────────
+// ── Translations ──────────────────────────────────────────────────────────────
 const T = {
   ar: {
     dir: "rtl", name: "إبداع AI",
-    tagline: "منصة الذكاء الاصطناعي لإبداع بلا حدود",
     nav: { chat: "المحادثة", images: "الصور", video: "الفيديو", gallery: "معرضي", pricing: "الأسعار", profile: "حسابي" },
-    hero: { title: "اصنع المستقبل", subtitle: "بالذكاء الاصطناعي", desc: "توليد صور، فيديوهات، ومحادثات ذكية — كل ما تحتاجه في مكان واحد", cta: "ابدأ مجاناً", demo: "الأسعار" },
-    chat: { title: "المحادثة الذكية", placeholder: "اكتب رسالتك هنا...", send: "إرسال", clear: "مسح", thinking: "جاري التفكير...", welcome: "مرحباً! أنا مساعدك الذكي. كيف يمكنني مساعدتك اليوم؟" },
-    image: { title: "توليد الصور", placeholder: "صِف الصورة التي تريدها...", generate: "توليد الصورة", generating: "جاري التوليد...", style: "النمط", styles: { realistic: "واقعي", artistic: "فني", anime: "أنمي", abstract: "تجريدي" }, cost: "تكلفة: 10 رصيد", uploadLabel: "📎 أضف صورة مرجعية", uploadHint: "اسحب وأفلت أو انقر للرفع" },
-    video: {
-      title: "توليد الفيديو", generate: "توليد الفيديو", generating: "جاري المعالجة...", duration: "المدة",
-      modes: { text2video: "نص إلى فيديو", img2video: "صورة إلى فيديو", effects: "مؤثرات بصرية", lipsync: "مزامنة الشفاه" },
-      placeholders: { text2video: "صِف الفيديو... مثال: طائر يحلق فوق مدينة مضيئة", img2video: "صِف التحويل... مثال: اجعل الصورة تتحرك ببطء", effects: "صِف المؤثر... مثال: تأثير سينمائي مع ضباب", lipsync: "أضف نصاً للمزامنة مع الشخصية..." },
-      uploadImg: "📎 ارفع صورة للتحويل", uploadVid: "🎬 ارفع فيديو للمؤثرات", resolution: "الدقة", aspectRatio: "نسبة العرض",
-    },
-    gallery: { title: "معرض أعمالي", empty: "لا توجد أعمال بعد. ابدأ بتوليد صورة أو فيديو!", delete: "حذف" },
-    pricing: {
-      title: "اختر خطتك", subtitle: "ابدأ مجاناً، طور حسب احتياجك",
-      plans: [
-        { id: "free",  name: "المجاني",    price: "0",   currency: "درهم/شهر", credits: 50,   features: ["50 رصيد شهرياً", "توليد صور عادية", "محادثة مفتوحة", "معرض 10 أعمال"], cta: "ابدأ مجاناً", popular: false },
-        { id: "pro",   name: "الاحترافي", price: "99",  currency: "درهم/شهر", credits: 500,  features: ["500 رصيد شهرياً", "توليد صور HD", "فيديو بكل الأوضاع", "محادثة غير محدودة", "معرض 100 عمل", "أولوية المعالجة"], cta: "اشترك الآن", popular: true },
-        { id: "ultra", name: "الأعمال",   price: "299", currency: "درهم/شهر", credits: 2000, features: ["2000 رصيد شهرياً", "جميع الميزات", "فيديو 4K", "API مخصص", "دعم 24/7", "معرض غير محدود"], cta: "تواصل معنا", popular: false },
-      ],
-    },
-    credits: "الرصيد", logout: "خروج", login: "دخول",
-    loginTitle: "مرحباً بعودتك", loginSub: "سجل دخولك للمتابعة",
-    email: "البريد الإلكتروني", password: "كلمة المرور",
-    firstName: "الاسم الأول", lastName: "اللقب", phone: "رقم الهاتف",
-    loginBtn: "تسجيل الدخول", registerBtn: "إنشاء حساب",
-    noAccount: "ليس لديك حساب؟", hasAccount: "لديك حساب؟",
-    demoLogin: "دخول تجريبي",
-    fillAll: "يرجى ملء جميع الحقول",
-    toast: { copied: "تم النسخ!", generated: "تم التوليد بنجاح!", error: "حدث خطأ، حاول مجدداً", noCredits: "رصيدك غير كافٍ! يرجى الترقية" },
-    pay: { title: "إتمام الدفع", subtitle: "أنت على بُعد خطوة واحدة", orderSummary: "ملخص الطلب", plan: "الخطة", credits: "الرصيد", total: "المجموع", currency: "درهم مغربي", secureBadge: "دفع آمن بـ YouCan Pay", payNow: "ادفع الآن", processing: "جاري المعالجة...", back: "رجوع", success: "تم الدفع! تم إضافة رصيدك.", failed: "فشل الدفع.", redirect: "جاري التحويل...", youcanBtn: "الدفع عبر YouCan Pay", backToPricing: "العودة للأسعار", guarantee: "ضمان 7 أيام", support: "دعم 24/7", ssl: "تشفير SSL" },
-    profile: { title: "حسابي", plan: "خطتي", credits: "رصيدي", joined: "عضو منذ", editName: "تعديل الاسم", save: "حفظ", history: "سجل الاستخدام", noHistory: "لا يوجد سجل بعد" },
-    uploadMedia: "📎 ارفع ملفاً",
+    hero: { title: "اصنع المستقبل", sub: "بالذكاء الاصطناعي", desc: "توليد صور، فيديوهات، ومحادثات ذكية — كل ما تحتاجه في مكان واحد", cta: "ابدأ مجاناً", pricing: "الأسعار" },
+    chat: { title: "المحادثة الذكية", ph: "اكتب رسالتك...", send: "إرسال", clear: "مسح", welcome: "مرحباً! أنا مساعدك الذكي." },
+    image: { title: "توليد الصور", ph: "صِف الصورة...", gen: "توليد", loading: "جاري التوليد...", style: "النمط", cost: "10 رصيد", upload: "📎 أضف صورة مرجعية", styles: { realistic: "واقعي", artistic: "فني", anime: "أنمي", abstract: "تجريدي" } },
+    video: { title: "توليد الفيديو", gen: "توليد", loading: "جاري المعالجة...", dur: "المدة", ratio: "النسبة", res: "الدقة", modes: { text2video: "نص→فيديو", img2video: "صورة→فيديو", effects: "مؤثرات", lipsync: "مزامنة" }, phs: { text2video: "صِف الفيديو...", img2video: "صِف التحويل...", effects: "صِف المؤثر...", lipsync: "أضف نصاً للمزامنة..." }, uploadImg: "📎 ارفع صورة", uploadVid: "🎬 ارفع فيديو" },
+    gallery: { title: "معرض أعمالي", empty: "لا توجد أعمال بعد!", del: "حذف" },
+    pricing: { title: "اختر خطتك", sub: "ابدأ مجاناً", plans: [
+      { id: "free",  name: "المجاني",    price: "0",   cur: "درهم/شهر", credits: 50,   feats: ["50 رصيد", "صور عادية", "محادثة مفتوحة"], cta: "ابدأ مجاناً", hot: false },
+      { id: "pro",   name: "الاحترافي", price: "99",  cur: "درهم/شهر", credits: 500,  feats: ["500 رصيد", "صور HD", "كل أوضاع الفيديو", "أولوية المعالجة"], cta: "اشترك الآن", hot: true },
+      { id: "ultra", name: "الأعمال",   price: "299", cur: "درهم/شهر", credits: 2000, feats: ["2000 رصيد", "كل الميزات", "فيديو 4K", "دعم 24/7"], cta: "تواصل معنا", hot: false },
+    ]},
+    login: { title: "مرحباً بعودتك", sub: "سجل دخولك للمتابعة", email: "البريد الإلكتروني", pass: "كلمة المرور", fname: "الاسم الأول", lname: "اللقب", phone: "رقم الهاتف", btn: "تسجيل الدخول", reg: "إنشاء حساب", demo: "دخول تجريبي", noAcc: "ليس لديك حساب؟", hasAcc: "لديك حساب؟", checkEmail: "تحقق من بريدك الإلكتروني!" },
+    profile: { title: "حسابي", plan: "خطتي", creds: "رصيدي", works: "أعمالي", history: "السجل", noHistory: "لا يوجد سجل بعد", edit: "تعديل", save: "حفظ" },
+    pay: { title: "إتمام الدفع", summary: "ملخص الطلب", plan: "الخطة", creds: "الرصيد", total: "المجموع", cur: "درهم", btn: "الدفع عبر YouCan Pay", back: "رجوع", secure: "دفع آمن", guarantee: "ضمان 7 أيام", support: "دعم 24/7" },
+    credits: "الرصيد", logout: "خروج", login: "دخول", fillAll: "يرجى ملء جميع الحقول",
+    err: "حدث خطأ، حاول مجدداً", noCredits: "رصيدك غير كافٍ!", generated: "تم التوليد!", copied: "تم النسخ!",
   },
   fr: {
     dir: "ltr", name: "Ibda3 AI",
-    tagline: "La plateforme IA pour une créativité sans limites",
     nav: { chat: "Chat", images: "Images", video: "Vidéo", gallery: "Galerie", pricing: "Tarifs", profile: "Profil" },
-    hero: { title: "Créez l'avenir", subtitle: "avec l'Intelligence Artificielle", desc: "Génération d'images, vidéos et conversations — tout en un", cta: "Commencer gratuitement", demo: "Tarifs" },
-    chat: { title: "Chat Intelligent", placeholder: "Écrivez votre message...", send: "Envoyer", clear: "Effacer", thinking: "Réflexion...", welcome: "Bonjour! Je suis votre assistant IA." },
-    image: { title: "Génération d'Images", placeholder: "Décrivez l'image souhaitée...", generate: "Générer", generating: "Génération...", style: "Style", styles: { realistic: "Réaliste", artistic: "Artistique", anime: "Animé", abstract: "Abstrait" }, cost: "Coût: 10 crédits", uploadLabel: "📎 Ajouter une image", uploadHint: "Glissez ou cliquez pour uploader" },
-    video: {
-      title: "Génération de Vidéo", generate: "Générer", generating: "Traitement...", duration: "Durée",
-      modes: { text2video: "Texte en Vidéo", img2video: "Image en Vidéo", effects: "Effets Visuels", lipsync: "Lip Sync" },
-      placeholders: { text2video: "Décrivez la vidéo...", img2video: "Décrivez la transformation...", effects: "Décrivez l'effet...", lipsync: "Ajoutez le texte à synchroniser..." },
-      uploadImg: "📎 Uploader une image", uploadVid: "🎬 Uploader une vidéo", resolution: "Résolution", aspectRatio: "Format",
-    },
-    gallery: { title: "Ma Galerie", empty: "Aucune création. Commencez!", delete: "Supprimer" },
-    pricing: {
-      title: "Choisissez votre plan", subtitle: "Commencez gratuitement",
-      plans: [
-        { id: "free",  name: "Gratuit",  price: "0",   currency: "MAD/mois", credits: 50,   features: ["50 crédits/mois", "Images standard", "Chat illimité", "Galerie 10"], cta: "Commencer", popular: false },
-        { id: "pro",   name: "Pro",      price: "99",  currency: "MAD/mois", credits: 500,  features: ["500 crédits/mois", "Images HD", "Tous modes vidéo", "Chat illimité", "Galerie 100", "Prioritaire"], cta: "S'abonner", popular: true },
-        { id: "ultra", name: "Business", price: "299", currency: "MAD/mois", credits: 2000, features: ["2000 crédits/mois", "Tout inclus", "Vidéo 4K", "API dédiée", "Support 24/7", "Galerie illimitée"], cta: "Contactez-nous", popular: false },
-      ],
-    },
-    credits: "Crédits", logout: "Déconnexion", login: "Connexion",
-    loginTitle: "Bon retour", loginSub: "Connectez-vous pour continuer",
-    email: "Email", password: "Mot de passe",
-    firstName: "Prénom", lastName: "Nom", phone: "Téléphone",
-    loginBtn: "Se connecter", registerBtn: "Créer un compte",
-    noAccount: "Pas de compte?", hasAccount: "Déjà un compte?",
-    demoLogin: "Connexion démo", fillAll: "Veuillez remplir tous les champs",
-    toast: { copied: "Copié!", generated: "Généré!", error: "Erreur", noCredits: "Crédits insuffisants!" },
-    pay: { title: "Finaliser le paiement", subtitle: "Un pas vers la créativité", orderSummary: "Récapitulatif", plan: "Plan", credits: "Crédits", total: "Total", currency: "MAD", secureBadge: "Paiement sécurisé YouCan Pay", payNow: "Payer", processing: "Traitement...", back: "Retour", success: "Paiement réussi!", failed: "Échec.", redirect: "Redirection...", youcanBtn: "Payer via YouCan Pay", backToPricing: "Retour tarifs", guarantee: "Garantie 7 jours", support: "Support 24/7", ssl: "SSL" },
-    profile: { title: "Mon Profil", plan: "Mon plan", credits: "Mes crédits", joined: "Membre depuis", editName: "Modifier le nom", save: "Sauvegarder", history: "Historique", noHistory: "Aucun historique" },
-    uploadMedia: "📎 Uploader",
+    hero: { title: "Créez l'avenir", sub: "avec l'Intelligence Artificielle", desc: "Génération d'images, vidéos et conversations intelligentes", cta: "Commencer gratuitement", pricing: "Tarifs" },
+    chat: { title: "Chat Intelligent", ph: "Écrivez votre message...", send: "Envoyer", clear: "Effacer", welcome: "Bonjour! Je suis votre assistant IA." },
+    image: { title: "Génération d'Images", ph: "Décrivez l'image...", gen: "Générer", loading: "Génération...", style: "Style", cost: "10 crédits", upload: "📎 Ajouter image", styles: { realistic: "Réaliste", artistic: "Artistique", anime: "Animé", abstract: "Abstrait" } },
+    video: { title: "Génération Vidéo", gen: "Générer", loading: "Traitement...", dur: "Durée", ratio: "Format", res: "Résolution", modes: { text2video: "Texte→Vidéo", img2video: "Image→Vidéo", effects: "Effets", lipsync: "Lip Sync" }, phs: { text2video: "Décrivez la vidéo...", img2video: "Décrivez la transformation...", effects: "Décrivez l'effet...", lipsync: "Texte à synchroniser..." }, uploadImg: "📎 Image", uploadVid: "🎬 Vidéo" },
+    gallery: { title: "Ma Galerie", empty: "Aucune création!", del: "Supprimer" },
+    pricing: { title: "Choisissez votre plan", sub: "Commencez gratuitement", plans: [
+      { id: "free",  name: "Gratuit",  price: "0",   cur: "MAD/mois", credits: 50,   feats: ["50 crédits", "Images standard", "Chat illimité"], cta: "Commencer", hot: false },
+      { id: "pro",   name: "Pro",      price: "99",  cur: "MAD/mois", credits: 500,  feats: ["500 crédits", "Images HD", "Tous modes vidéo", "Priorité"], cta: "S'abonner", hot: true },
+      { id: "ultra", name: "Business", price: "299", cur: "MAD/mois", credits: 2000, feats: ["2000 crédits", "Tout inclus", "Vidéo 4K", "Support 24/7"], cta: "Contactez-nous", hot: false },
+    ]},
+    login: { title: "Bon retour", sub: "Connectez-vous pour continuer", email: "Email", pass: "Mot de passe", fname: "Prénom", lname: "Nom", phone: "Téléphone", btn: "Se connecter", reg: "Créer un compte", demo: "Démo", noAcc: "Pas de compte?", hasAcc: "Déjà un compte?", checkEmail: "Vérifiez votre email!" },
+    profile: { title: "Mon Profil", plan: "Mon plan", creds: "Mes crédits", works: "Créations", history: "Historique", noHistory: "Aucun historique", edit: "Modifier", save: "Sauvegarder" },
+    pay: { title: "Finaliser le paiement", summary: "Récapitulatif", plan: "Plan", creds: "Crédits", total: "Total", cur: "MAD", btn: "Payer via YouCan Pay", back: "Retour", secure: "Paiement sécurisé", guarantee: "Garantie 7 jours", support: "Support 24/7" },
+    credits: "Crédits", logout: "Déconnexion", login: "Connexion", fillAll: "Remplissez tous les champs",
+    err: "Erreur, réessayez", noCredits: "Crédits insuffisants!", generated: "Généré!", copied: "Copié!",
   },
   en: {
     dir: "ltr", name: "Ibda3 AI",
-    tagline: "The AI platform for limitless creativity",
     nav: { chat: "Chat", images: "Images", video: "Video", gallery: "Gallery", pricing: "Pricing", profile: "Profile" },
-    hero: { title: "Build the Future", subtitle: "with Artificial Intelligence", desc: "Generate images, videos, and intelligent conversations — all in one place", cta: "Start for Free", demo: "Pricing" },
-    chat: { title: "Smart Chat", placeholder: "Type your message...", send: "Send", clear: "Clear", thinking: "Thinking...", welcome: "Hello! I'm your AI assistant. How can I help?" },
-    image: { title: "Image Generation", placeholder: "Describe the image you want...", generate: "Generate Image", generating: "Generating...", style: "Style", styles: { realistic: "Realistic", artistic: "Artistic", anime: "Anime", abstract: "Abstract" }, cost: "Cost: 10 credits", uploadLabel: "📎 Add reference image", uploadHint: "Drag & drop or click to upload" },
-    video: {
-      title: "Video Generation", generate: "Generate Video", generating: "Processing...", duration: "Duration",
-      modes: { text2video: "Text to Video", img2video: "Image to Video", effects: "Visual Effects", lipsync: "Lip Sync" },
-      placeholders: { text2video: "Describe the video...", img2video: "Describe the transformation...", effects: "Describe the effect...", lipsync: "Add text to sync with character..." },
-      uploadImg: "📎 Upload image", uploadVid: "🎬 Upload video", resolution: "Resolution", aspectRatio: "Aspect Ratio",
-    },
-    gallery: { title: "My Gallery", empty: "No creations yet. Start generating!", delete: "Delete" },
-    pricing: {
-      title: "Choose Your Plan", subtitle: "Start free, scale as you grow",
-      plans: [
-        { id: "free",  name: "Free",     price: "0",   currency: "MAD/mo", credits: 50,   features: ["50 credits/month", "Standard images", "Unlimited chat", "Gallery 10"], cta: "Get Started", popular: false },
-        { id: "pro",   name: "Pro",      price: "99",  currency: "MAD/mo", credits: 500,  features: ["500 credits/month", "HD images", "All video modes", "Unlimited chat", "Gallery 100", "Priority"], cta: "Subscribe", popular: true },
-        { id: "ultra", name: "Business", price: "299", currency: "MAD/mo", credits: 2000, features: ["2000 credits/month", "Everything", "4K video", "Dedicated API", "24/7 support", "Unlimited gallery"], cta: "Contact Us", popular: false },
-      ],
-    },
-    credits: "Credits", logout: "Logout", login: "Login",
-    loginTitle: "Welcome Back", loginSub: "Sign in to continue",
-    email: "Email", password: "Password",
-    firstName: "First Name", lastName: "Last Name", phone: "Phone",
-    loginBtn: "Sign In", registerBtn: "Create Account",
-    noAccount: "No account?", hasAccount: "Have an account?",
-    demoLogin: "Demo Login", fillAll: "Please fill all fields",
-    toast: { copied: "Copied!", generated: "Generated!", error: "Error", noCredits: "Insufficient credits!" },
-    pay: { title: "Complete Payment", subtitle: "One step away", orderSummary: "Order Summary", plan: "Plan", credits: "Credits", total: "Total", currency: "MAD", secureBadge: "Secure payment via YouCan Pay", payNow: "Pay Now", processing: "Processing...", back: "Back", success: "Payment successful!", failed: "Payment failed.", redirect: "Redirecting...", youcanBtn: "Pay via YouCan Pay", backToPricing: "Back to Pricing", guarantee: "7-day guarantee", support: "24/7 Support", ssl: "SSL" },
-    profile: { title: "My Profile", plan: "My Plan", credits: "My Credits", joined: "Member since", editName: "Edit Name", save: "Save", history: "Usage History", noHistory: "No history yet" },
-    uploadMedia: "📎 Upload File",
+    hero: { title: "Build the Future", sub: "with Artificial Intelligence", desc: "Generate images, videos, and intelligent conversations — all in one place", cta: "Start for Free", pricing: "Pricing" },
+    chat: { title: "Smart Chat", ph: "Type your message...", send: "Send", clear: "Clear", welcome: "Hello! I'm your AI assistant." },
+    image: { title: "Image Generation", ph: "Describe the image...", gen: "Generate", loading: "Generating...", style: "Style", cost: "10 credits", upload: "📎 Add reference image", styles: { realistic: "Realistic", artistic: "Artistic", anime: "Anime", abstract: "Abstract" } },
+    video: { title: "Video Generation", gen: "Generate", loading: "Processing...", dur: "Duration", ratio: "Aspect Ratio", res: "Resolution", modes: { text2video: "Text→Video", img2video: "Image→Video", effects: "Effects", lipsync: "Lip Sync" }, phs: { text2video: "Describe the video...", img2video: "Describe the transformation...", effects: "Describe the effect...", lipsync: "Add text to sync..." }, uploadImg: "📎 Upload image", uploadVid: "🎬 Upload video" },
+    gallery: { title: "My Gallery", empty: "No creations yet!", del: "Delete" },
+    pricing: { title: "Choose Your Plan", sub: "Start free, scale as you grow", plans: [
+      { id: "free",  name: "Free",     price: "0",   cur: "MAD/mo", credits: 50,   feats: ["50 credits", "Standard images", "Unlimited chat"], cta: "Get Started", hot: false },
+      { id: "pro",   name: "Pro",      price: "99",  cur: "MAD/mo", credits: 500,  feats: ["500 credits", "HD images", "All video modes", "Priority"], cta: "Subscribe", hot: true },
+      { id: "ultra", name: "Business", price: "299", cur: "MAD/mo", credits: 2000, feats: ["2000 credits", "Everything", "4K video", "24/7 support"], cta: "Contact Us", hot: false },
+    ]},
+    login: { title: "Welcome Back", sub: "Sign in to continue", email: "Email", pass: "Password", fname: "First Name", lname: "Last Name", phone: "Phone", btn: "Sign In", reg: "Create Account", demo: "Demo Login", noAcc: "No account?", hasAcc: "Have an account?", checkEmail: "Check your email!" },
+    profile: { title: "My Profile", plan: "My Plan", creds: "My Credits", works: "Creations", history: "History", noHistory: "No history yet", edit: "Edit", save: "Save" },
+    pay: { title: "Complete Payment", summary: "Order Summary", plan: "Plan", creds: "Credits", total: "Total", cur: "MAD", btn: "Pay via YouCan Pay", back: "Back", secure: "Secure payment", guarantee: "7-day guarantee", support: "24/7 Support" },
+    credits: "Credits", logout: "Logout", login: "Login", fillAll: "Please fill all fields",
+    err: "Error, please try again", noCredits: "Insufficient credits!", generated: "Generated!", copied: "Copied!",
   },
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [lang, setLang] = useState("ar");
-  const [page, setPage] = useState("home");
-  const [user, setUser] = useState(null);
-  const [credits, setCredits] = useState(50);
-  const [gallery, setGallery] = useState([]);
-  const [toast, setToast] = useState(null);
-  const [chatMessages, setChatMessages] = useState([]);
-  const [chatInput, setChatInput] = useState("");
-  const [chatLoading, setChatLoading] = useState(false);
-  const [imagePrompt, setImagePrompt] = useState("");
-  const [imageStyle, setImageStyle] = useState("realistic");
-  const [imageLoading, setImageLoading] = useState(false);
-  const [generatedImage, setGeneratedImage] = useState(null);
-  const [imageFile, setImageFile] = useState(null);
-  const [videoPrompt, setVideoPrompt] = useState("");
-  const [videoMode, setVideoMode] = useState("text2video");
-  const [videoDuration, setVideoDuration] = useState("5");
-  const [videoAspect, setVideoAspect] = useState("16:9");
-  const [videoResolution, setVideoResolution] = useState("720p");
-  const [videoLoading, setVideoLoading] = useState(false);
-  const [generatedVideo, setGeneratedVideo] = useState(null);
-  const [videoFile, setVideoFile] = useState(null);
-  const [loginMode, setLoginMode] = useState("login");
-  const [loginEmail, setLoginEmail] = useState("");
-  const [loginPass, setLoginPass] = useState("");
-  const [loginFirst, setLoginFirst] = useState("");
-  const [loginLast, setLoginLast] = useState("");
-  const [loginPhone, setLoginPhone] = useState("");
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [selectedPlan, setSelectedPlan] = useState(null);
-  const [payLoading, setPayLoading] = useState(false);
-  const [editingName, setEditingName] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [usageHistory, setUsageHistory] = useState([]);
-  const chatEndRef = useRef(null);
-  const imageFileRef = useRef(null);
-  const videoFileRef = useRef(null);
+  const [lang, setLang]               = useState("ar");
+  const [page, setPage]               = useState("home");
+  const [user, setUser]               = useState(null);
+  const [credits, setCredits]         = useState(50);
+  const [gallery, setGallery]         = useState([]);
+  const [history, setHistory]         = useState([]);
+  const [toast, setToast]             = useState(null);
+  // chat
+  const [msgs, setMsgs]               = useState([]);
+  const [chatIn, setChatIn]           = useState("");
+  const [chatLoad, setChatLoad]       = useState(false);
+  // image
+  const [imgPrompt, setImgPrompt]     = useState("");
+  const [imgStyle, setImgStyle]       = useState("realistic");
+  const [imgLoad, setImgLoad]         = useState(false);
+  const [imgResult, setImgResult]     = useState(null);
+  // video
+  const [vidPrompt, setVidPrompt]     = useState("");
+  const [vidMode, setVidMode]         = useState("text2video");
+  const [vidDur, setVidDur]           = useState("5");
+  const [vidAspect, setVidAspect]     = useState("16:9");
+  const [vidRes, setVidRes]           = useState("720p");
+  const [vidLoad, setVidLoad]         = useState(false);
+  const [vidResult, setVidResult]     = useState(null);
+  // login
+  const [loginMode, setLoginMode]     = useState("login");
+  const [lEmail, setLEmail]           = useState("");
+  const [lPass, setLPass]             = useState("");
+  const [lFirst, setLFirst]           = useState("");
+  const [lLast, setLLast]             = useState("");
+  const [lPhone, setLPhone]           = useState("");
+  const [lLoad, setLLoad]             = useState(false);
+  // payment
+  const [selPlan, setSelPlan]         = useState(null);
+  const [payLoad, setPayLoad]         = useState(false);
+  // profile edit
+  const [editName, setEditName]       = useState(false);
+  const [newName, setNewName]         = useState("");
+  const chatEnd = useRef(null);
 
   const t = T[lang];
-  const isRTL = t.dir === "rtl";
+  useEffect(() => { document.documentElement.dir = t.dir; document.documentElement.lang = lang; }, [lang, t.dir]);
+  useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
-  useEffect(() => {
-    document.documentElement.dir = t.dir;
-    document.documentElement.lang = lang;
-  }, [lang, t.dir]);
-
-  useEffect(() => {
-    if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages]);
-
-  const showToast = useCallback((msg, type = "success") => {
+  const toast_ = useCallback((msg, type = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
   }, []);
 
-  // ── Supabase Auth ────────────────────────────────────────────────────────────
+  const addHistory = (type, prompt) => setHistory(h => [{ id: Date.now(), type, prompt: prompt.slice(0, 50), date: new Date().toLocaleDateString() }, ...h.slice(0, 19)]);
+
+  // ── Auth ────────────────────────────────────────────────────────────────────
   const handleLogin = async () => {
-    if (!loginEmail || !loginPass) { showToast(t.fillAll, "error"); return; }
-    setLoginLoading(true);
-    try {
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
-        body: JSON.stringify({ email: loginEmail, password: loginPass }),
-      });
-      const data = await res.json();
-      if (data.error) { showToast(data.error_description || t.toast.error, "error"); }
-      else {
-        setUser({ name: data.user?.user_metadata?.full_name || loginEmail.split("@")[0], email: loginEmail, id: data.user?.id, token: data.access_token });
-        setChatMessages([{ role: "assistant", content: t.chat.welcome }]);
-        setPage("chat");
-        showToast(lang === "ar" ? "أهلاً بك!" : lang === "fr" ? "Bienvenue!" : "Welcome!");
-      }
-    } catch { showToast(t.toast.error, "error"); }
-    setLoginLoading(false);
+    if (!lEmail || !lPass) { toast_(t.fillAll, "error"); return; }
+    if (!sb) { toast_(t.err, "error"); return; }
+    setLLoad(true);
+    const { data, error } = await sb.auth.signInWithPassword({ email: lEmail, password: lPass });
+    if (error) toast_(error.message, "error");
+    else {
+      const profile = await sb.from("profiles").select("*").eq("id", data.user.id).single();
+      setUser({ id: data.user.id, name: profile.data?.full_name || lEmail.split("@")[0], email: lEmail, token: data.session?.access_token });
+      setCredits(profile.data?.credits ?? 50);
+      setMsgs([{ role: "assistant", content: t.chat.welcome }]);
+      setPage("chat");
+      toast_(lang === "ar" ? "أهلاً بك!" : lang === "fr" ? "Bienvenue!" : "Welcome!");
+    }
+    setLLoad(false);
   };
 
   const handleRegister = async () => {
-    if (!loginFirst || !loginLast || !loginPhone || !loginEmail || !loginPass) { showToast(t.fillAll, "error"); return; }
-    // Basic validation
-    if (loginPass.length < 8) { showToast(lang === "ar" ? "كلمة المرور 8 أحرف على الأقل" : "Password must be 8+ chars", "error"); return; }
-    if (!/\S+@\S+\.\S+/.test(loginEmail)) { showToast(lang === "ar" ? "بريد إلكتروني غير صالح" : "Invalid email", "error"); return; }
-    setLoginLoading(true);
-    try {
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
-        body: JSON.stringify({ email: loginEmail, password: loginPass, data: { full_name: `${loginFirst} ${loginLast}`, phone: loginPhone } }),
-      });
-      const data = await res.json();
-      if (data.error) { showToast(data.error_description || t.toast.error, "error"); }
-      else { showToast(lang === "ar" ? "تحقق من بريدك الإلكتروني!" : lang === "fr" ? "Vérifiez votre email!" : "Check your email!"); setLoginMode("login"); }
-    } catch { showToast(t.toast.error, "error"); }
-    setLoginLoading(false);
+    if (!lFirst || !lLast || !lPhone || !lEmail || !lPass) { toast_(t.fillAll, "error"); return; }
+    if (lPass.length < 8) { toast_(lang === "ar" ? "كلمة المرور 8 أحرف على الأقل" : "Password must be 8+ chars", "error"); return; }
+    if (!sb) { toast_(t.err, "error"); return; }
+    setLLoad(true);
+    const { error } = await sb.auth.signUp({ email: lEmail, password: lPass, options: { data: { full_name: `${lFirst} ${lLast}`, phone: lPhone } } });
+    if (error) toast_(error.message, "error");
+    else { toast_(t.login.checkEmail); setLoginMode("login"); }
+    setLLoad(false);
   };
 
-  const handleDemoLogin = () => {
-    setUser({ name: lang === "ar" ? "مستخدم تجريبي" : "Demo User", email: "demo@ibda3ai.com", id: "demo" });
+  const handleDemo = () => {
+    setUser({ id: "demo", name: lang === "ar" ? "مستخدم تجريبي" : "Demo User", email: "demo@ibda3ai.com" });
     setCredits(150);
-    setChatMessages([{ role: "assistant", content: t.chat.welcome }]);
+    setMsgs([{ role: "assistant", content: t.chat.welcome }]);
     setPage("chat");
   };
 
-  const handleLogout = () => { setUser(null); setPage("home"); setCredits(50); };
+  const handleLogout = async () => {
+    if (sb) await sb.auth.signOut();
+    setUser(null); setPage("home"); setCredits(50);
+  };
 
-  // ── Chat (secure: goes through /api/chat) ────────────────────────────────────
+  // ── Chat ────────────────────────────────────────────────────────────────────
   const sendChat = async () => {
-    if (!chatInput.trim() || chatLoading) return;
-    const userMsg = { role: "user", content: chatInput };
-    const msgs = [...chatMessages, userMsg];
-    setChatMessages(msgs);
-    setChatInput("");
-    setChatLoading(true);
+    if (!chatIn.trim() || chatLoad) return;
+    const userMsg = { role: "user", content: chatIn };
+    const newMsgs = [...msgs, userMsg];
+    setMsgs(newMsgs); setChatIn(""); setChatLoad(true);
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...(user?.token ? { "Authorization": `Bearer ${user.token}` } : {}) },
-        body: JSON.stringify({ messages: msgs.map(m => ({ role: m.role, content: m.content })), userId: user?.id || "demo" }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: newMsgs.map(m => ({ role: m.role, content: m.content })), userId: user?.id || "demo" }),
       });
+      if (res.status === 402) { toast_(t.noCredits, "error"); setChatLoad(false); return; }
       const data = await res.json();
-      if (res.status === 402) { showToast(t.toast.noCredits, "error"); setChatLoading(false); return; }
-      const reply = data.content || t.toast.error;
-      setChatMessages([...msgs, { role: "assistant", content: reply }]);
-      addHistory("chat", chatInput);
-    } catch { showToast(t.toast.error, "error"); }
-    setChatLoading(false);
+      setMsgs([...newMsgs, { role: "assistant", content: data.content || t.err }]);
+      if (data.balance !== undefined) setCredits(data.balance);
+      addHistory("chat", chatIn);
+    } catch { toast_(t.err, "error"); }
+    setChatLoad(false);
   };
 
-  // ── Image Generation (secure: goes through /api/generate-image) ──────────────
-  const generateImage = async () => {
-    if (!imagePrompt.trim() || imageLoading) return;
-    if (credits < 10) { showToast(t.toast.noCredits, "error"); return; }
-    setImageLoading(true); setGeneratedImage(null);
+  // ── Image ───────────────────────────────────────────────────────────────────
+  const genImage = async () => {
+    if (!imgPrompt.trim() || imgLoad) return;
+    if (credits < 10) { toast_(t.noCredits, "error"); return; }
+    setImgLoad(true); setImgResult(null);
     try {
       const res = await fetch("/api/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: imagePrompt, style: imageStyle, userId: user?.id || "demo" }),
+        body: JSON.stringify({ prompt: imgPrompt, style: imgStyle, userId: user?.id || "demo" }),
       });
       const data = await res.json();
-      const imgUrl = data.url || `https://picsum.photos/seed/${Date.now()}/600/400`;
-      setGeneratedImage(imgUrl);
-      setCredits(c => c - 10);
-      setGallery(g => [{ id: Date.now(), type: "image", url: imgUrl, prompt: imagePrompt, date: new Date().toLocaleDateString() }, ...g]);
-      showToast(t.toast.generated);
-      addHistory("image", imagePrompt);
-    } catch { showToast(t.toast.error, "error"); }
-    setImageLoading(false);
+      const url = data.url || `https://picsum.photos/seed/${Date.now()}/800/600`;
+      setImgResult(url);
+      if (data.balance !== undefined) setCredits(data.balance);
+      else setCredits(c => c - 10);
+      setGallery(g => [{ id: Date.now(), type: "image", url, prompt: imgPrompt, date: new Date().toLocaleDateString() }, ...g]);
+      toast_(t.generated); addHistory("image", imgPrompt);
+    } catch { toast_(t.err, "error"); }
+    setImgLoad(false);
   };
 
-  // ── Video Generation (secure: goes through /api/generate-video) ──────────────
-  const generateVideo = async () => {
-    if (!videoPrompt.trim() || videoLoading) return;
-    const cost = videoMode === "text2video" ? 50 : videoMode === "img2video" ? 60 : videoMode === "effects" ? 40 : 70;
-    if (credits < cost) { showToast(t.toast.noCredits, "error"); return; }
-    setVideoLoading(true); setGeneratedVideo(null);
+  // ── Video ───────────────────────────────────────────────────────────────────
+  const genVideo = async () => {
+    if (!vidPrompt.trim() || vidLoad) return;
+    const cost = VIDEO_COSTS[vidMode] ?? 50;
+    if (credits < cost) { toast_(t.noCredits, "error"); return; }
+    setVidLoad(true); setVidResult(null);
     try {
       const res = await fetch("/api/generate-video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: videoPrompt, mode: videoMode, duration: videoDuration, aspect: videoAspect, resolution: videoResolution, userId: user?.id || "demo" }),
+        body: JSON.stringify({ prompt: vidPrompt, mode: vidMode, duration: vidDur, aspect: vidAspect, resolution: vidRes, userId: user?.id || "demo" }),
       });
       const data = await res.json();
-      const thumbUrl = data.thumbnail || `https://picsum.photos/seed/${Date.now()}/600/338`;
-      setGeneratedVideo({ thumb: thumbUrl, prompt: videoPrompt, mode: videoMode });
-      setCredits(c => c - cost);
-      setGallery(g => [{ id: Date.now(), type: "video", url: thumbUrl, prompt: videoPrompt, date: new Date().toLocaleDateString() }, ...g]);
-      showToast(t.toast.generated);
-      addHistory("video", videoPrompt);
-    } catch { showToast(t.toast.error, "error"); }
-    setVideoLoading(false);
+      const thumb = data.thumbnail || `https://picsum.photos/seed/${Date.now()}/640/360`;
+      setVidResult({ thumb, prompt: vidPrompt, mode: vidMode });
+      if (data.balance !== undefined) setCredits(data.balance);
+      else setCredits(c => c - cost);
+      setGallery(g => [{ id: Date.now(), type: "video", url: thumb, prompt: vidPrompt, date: new Date().toLocaleDateString() }, ...g]);
+      toast_(t.generated); addHistory("video", vidPrompt);
+    } catch { toast_(t.err, "error"); }
+    setVidLoad(false);
   };
 
-  // ── Payment (secure: goes through /api/youcanpay/checkout) ──────────────────
+  // ── Payment ─────────────────────────────────────────────────────────────────
   const openPayment = (plan) => {
     if (!user) { setPage("login"); return; }
-    if (plan.id === "free") { showToast(lang === "ar" ? "أنت على الخطة المجانية" : "You're on the free plan"); return; }
-    if (plan.id === "ultra") { showToast(lang === "ar" ? "تواصل معنا عبر البريد" : "Contact us via email"); return; }
-    setSelectedPlan(plan); setPage("payment");
+    if (plan.id === "free") { toast_(lang === "ar" ? "أنت على الخطة المجانية" : "You're on the free plan"); return; }
+    if (plan.id === "ultra") { toast_(lang === "ar" ? "تواصل معنا عبر البريد" : "Contact us via email"); return; }
+    setSelPlan(plan); setPage("payment");
   };
 
-  const handleYouCanRedirect = async () => {
-    if (!selectedPlan || !user) return;
-    setPayLoading(true);
-    showToast(t.pay.redirect);
+  const handlePay = async () => {
+    if (!selPlan || !user) return;
+    setPayLoad(true);
+    toast_(lang === "ar" ? "جاري التحويل..." : "Redirecting...");
     try {
       const res = await fetch("/api/youcanpay/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planId: selectedPlan.id, userId: user.id, email: user.email }),
+        body: JSON.stringify({ planId: selPlan.id, userId: user.id, email: user.email }),
       });
       const data = await res.json();
-      if (data.checkout_url) { window.location.href = data.checkout_url; }
-      else { showToast(t.pay.failed, "error"); }
-    } catch { showToast(t.pay.failed, "error"); }
-    setPayLoading(false);
+      if (data.checkout_url) window.location.href = data.checkout_url;
+      else toast_(t.err, "error");
+    } catch { toast_(t.err, "error"); }
+    setPayLoad(false);
   };
 
-  const addHistory = (type, prompt) => {
-    setUsageHistory(h => [{ id: Date.now(), type, prompt: prompt.slice(0, 50), date: new Date().toLocaleDateString() }, ...h.slice(0, 19)]);
-  };
-
-  // ─── CSS ──────────────────────────────────────────────────────────────────────
-  const styles = `
+  // ── CSS ─────────────────────────────────────────────────────────────────────
+  const css = `
     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&family=Noto+Kufi+Arabic:wght@300;400;600;700;800&display=swap');
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #050508; --surface: #0d0d14; --surface2: #13131e;
-      --border: rgba(255,255,255,0.07); --border2: rgba(255,255,255,0.12);
-      --accent: #7c5cfc; --accent2: #c158f5; --gold: #f0c040;
-      --text: #e8e8f0; --muted: #7070a0; --success: #4ade80; --error: #f87171;
-      --font: ${lang === "ar" ? "'Noto Kufi Arabic'" : "'Sora'"}, sans-serif;
-      --radius: 16px; --glow: 0 0 40px rgba(124,92,252,0.25);
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg:#050508;--s1:#0d0d14;--s2:#13131e;
+      --b1:rgba(255,255,255,0.07);--b2:rgba(255,255,255,0.12);
+      --ac:#7c5cfc;--ac2:#c158f5;--gold:#f0c040;
+      --txt:#e8e8f0;--mut:#7070a0;--ok:#4ade80;--er:#f87171;
+      --font:${lang==="ar"?"'Noto Kufi Arabic'":"'Sora'"}, sans-serif;
+      --r:16px;--glow:0 0 40px rgba(124,92,252,0.25);
     }
-    html, body, #root { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); }
-    .app { min-height: 100vh; display: flex; flex-direction: column; }
+    html,body,#root{height:100%;background:var(--bg);color:var(--txt);font-family:var(--font)}
+    .app{min-height:100vh;display:flex;flex-direction:column}
 
-    /* ── Animated background orbs ── */
-    .bg-orbs { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
-    .orb {
-      position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.15;
-      animation: orbFloat 8s ease-in-out infinite;
-    }
-    .orb-1 { width: 600px; height: 600px; background: radial-gradient(circle, #7c5cfc, transparent); top: -200px; left: -200px; animation-delay: 0s; }
-    .orb-2 { width: 400px; height: 400px; background: radial-gradient(circle, #c158f5, transparent); bottom: -100px; right: -100px; animation-delay: 3s; }
-    .orb-3 { width: 300px; height: 300px; background: radial-gradient(circle, #f0c040, transparent); top: 40%; left: 60%; animation-delay: 5s; }
-    @keyframes orbFloat {
-      0%, 100% { transform: translate(0, 0) scale(1); }
-      33% { transform: translate(30px, -30px) scale(1.05); }
-      66% { transform: translate(-20px, 20px) scale(0.95); }
-    }
+    /* ── NAVBAR ── */
+    .nav{position:fixed;top:0;left:0;right:0;z-index:200;background:rgba(5,5,8,0.9);backdrop-filter:blur(20px);border-bottom:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between;padding:0 20px;height:60px;gap:12px}
+    .nav-logo{display:flex;align-items:center;gap:8px;cursor:pointer}
+    .nav-logo-icon{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--ac),var(--ac2));display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:var(--glow)}
+    .nav-logo-txt{font-size:17px;font-weight:700;background:linear-gradient(135deg,#a78bfa,#e879f9);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .nav-links{display:flex;gap:2px}
+    .nav-link{padding:6px 12px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--mut);transition:all .2s;border:none;background:none;font-family:var(--font)}
+    .nav-link:hover,.nav-link.on{color:var(--txt);background:rgba(255,255,255,0.07)}
+    .nav-r{display:flex;align-items:center;gap:8px}
+    .creds-badge{display:flex;align-items:center;gap:5px;padding:4px 10px;background:rgba(240,192,64,0.1);border:1px solid rgba(240,192,64,0.25);border-radius:20px;font-size:12px;font-weight:600;color:var(--gold)}
+    .lang-btn{padding:4px 8px;border-radius:7px;border:1px solid var(--b2);background:var(--s1);color:var(--mut);cursor:pointer;font-size:11px;font-family:var(--font);transition:all .2s}
+    .lang-btn:hover{color:var(--txt);border-color:var(--ac)}
+    .btn-g{padding:7px 14px;border-radius:9px;border:1px solid var(--b2);background:none;color:var(--txt);cursor:pointer;font-family:var(--font);font-size:13px;transition:all .2s}
+    .btn-g:hover{background:rgba(255,255,255,0.07)}
+    .btn-p{padding:8px 18px;border-radius:9px;border:none;cursor:pointer;background:linear-gradient(135deg,var(--ac),var(--ac2));color:#fff;font-family:var(--font);font-size:13px;font-weight:600;transition:all .2s;box-shadow:0 0 20px rgba(124,92,252,0.3)}
+    .btn-p:hover{transform:translateY(-1px);box-shadow:0 0 30px rgba(124,92,252,0.5)}
+    .btn-p:disabled{opacity:.5;cursor:not-allowed;transform:none}
+    .main{flex:1;padding-top:60px}
 
-    /* ── Navbar ── */
-    .navbar {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-      background: rgba(5,5,8,0.85); backdrop-filter: blur(20px);
-      border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 0 24px; height: 64px; gap: 16px;
-    }
-    .nav-logo { display: flex; align-items: center; gap: 10px; cursor: pointer; }
-    .nav-logo-icon { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: var(--glow); }
-    .nav-logo-text { font-size: 18px; font-weight: 700; background: linear-gradient(135deg, #a78bfa, #e879f9); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .nav-links { display: flex; gap: 4px; }
-    .nav-link { padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--muted); transition: all 0.2s; border: none; background: none; font-family: var(--font); }
-    .nav-link:hover, .nav-link.active { color: var(--text); background: rgba(255,255,255,0.07); }
-    .nav-right { display: flex; align-items: center; gap: 12px; }
-    .credits-badge { display: flex; align-items: center; gap: 6px; padding: 5px 12px; background: rgba(240,192,64,0.1); border: 1px solid rgba(240,192,64,0.25); border-radius: 20px; font-size: 13px; font-weight: 600; color: var(--gold); }
-    .lang-btn { padding: 5px 10px; border-radius: 8px; border: 1px solid var(--border2); background: var(--surface); color: var(--muted); cursor: pointer; font-size: 12px; font-family: var(--font); transition: all 0.2s; }
-    .lang-btn:hover { color: var(--text); border-color: var(--accent); }
-    .btn-ghost { padding: 7px 16px; border-radius: 10px; border: 1px solid var(--border2); background: none; color: var(--text); cursor: pointer; font-family: var(--font); font-size: 13px; transition: all 0.2s; }
-    .btn-ghost:hover { background: rgba(255,255,255,0.07); }
-    .btn-primary { padding: 8px 20px; border-radius: 10px; border: none; cursor: pointer; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; font-family: var(--font); font-size: 14px; font-weight: 600; transition: all 0.2s; box-shadow: 0 0 20px rgba(124,92,252,0.3); }
-    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 0 30px rgba(124,92,252,0.5); }
-    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-    .main { flex: 1; padding-top: 64px; position: relative; z-index: 1; }
+    /* ── HERO DESERT ANIMATION ── */
+    .hero{min-height:calc(100vh - 60px);position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:40px 20px}
 
-    /* ── Hero ── */
-    .hero { min-height: calc(100vh - 64px); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px 24px; position: relative; overflow: hidden; }
-    .hero-grid { position: absolute; inset: 0; z-index: 0; opacity: 0.03; background-image: linear-gradient(var(--border2) 1px, transparent 1px), linear-gradient(90deg, var(--border2) 1px, transparent 1px); background-size: 60px 60px; }
-    .hero-content { position: relative; z-index: 1; max-width: 800px; }
-    .hero-badge { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 32px; padding: 8px 18px; border-radius: 50px; border: 1px solid rgba(124,92,252,0.3); background: rgba(124,92,252,0.1); font-size: 13px; color: #a78bfa; animation: fadeUp 0.6s ease both; }
-    .hero-title { font-size: clamp(48px,8vw,96px); font-weight: 800; line-height: 1; margin-bottom: 8px; animation: fadeUp 0.6s 0.1s ease both; }
-    .hero-title-grad { background: linear-gradient(135deg, #a78bfa, #e879f9, #f0c040); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .hero-subtitle { font-size: clamp(20px,3vw,32px); font-weight: 300; color: var(--muted); margin-bottom: 24px; animation: fadeUp 0.6s 0.2s ease both; }
-    .hero-desc { font-size: 16px; color: var(--muted); max-width: 500px; margin: 0 auto 40px; line-height: 1.7; animation: fadeUp 0.6s 0.3s ease both; }
-    .hero-btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; animation: fadeUp 0.6s 0.4s ease both; }
-    .btn-large { padding: 14px 32px; font-size: 16px; border-radius: 14px; }
-    .hero-stats { display: flex; gap: 40px; margin-top: 60px; animation: fadeUp 0.6s 0.5s ease both; }
-    .stat { text-align: center; }
-    .stat-num { font-size: 28px; font-weight: 800; background: linear-gradient(135deg, #a78bfa, #e879f9); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .stat-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    /* Sky */
+    .sky{position:absolute;inset:0;background:linear-gradient(180deg,#0a0015 0%,#1a0030 30%,#2d0050 50%,#8b4513 65%,#cd853f 72%,#daa520 78%,#f4a460 85%,#e8c48a 100%);z-index:0}
 
-    /* ── Upload badge on hero ── */
-    .hero-upload-hint { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; animation: fadeUp 0.6s 0.7s ease both; }
-    .upload-hint-btn { display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 12px; border: 1px dashed rgba(124,92,252,0.4); background: rgba(124,92,252,0.06); color: #a78bfa; font-size: 13px; cursor: pointer; transition: all 0.2s; font-family: var(--font); }
-    .upload-hint-btn:hover { background: rgba(124,92,252,0.12); border-color: var(--accent); }
+    /* Stars */
+    .stars{position:absolute;top:0;left:0;right:0;height:60%;z-index:1;overflow:hidden}
+    .star{position:absolute;background:#fff;border-radius:50%;animation:twinkle 3s infinite}
+    @keyframes twinkle{0%,100%{opacity:.3;transform:scale(1)}50%{opacity:1;transform:scale(1.3)}}
 
-    /* ── Features ── */
-    .features { display: flex; gap: 16px; padding: 20px 24px 40px; max-width: 1100px; margin: 0 auto; flex-wrap: wrap; }
-    .feature-card { flex: 1; min-width: 200px; padding: 24px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); transition: all 0.3s; }
-    .feature-card:hover { border-color: var(--accent); transform: translateY(-4px); box-shadow: var(--glow); }
-    .feature-icon { font-size: 32px; margin-bottom: 12px; }
-    .feature-title { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
-    .feature-desc { font-size: 13px; color: var(--muted); line-height: 1.6; }
+    /* Sun/Moon */
+    .sun{position:absolute;width:80px;height:80px;border-radius:50%;background:radial-gradient(circle,#fff9c4,#ffd700,#ff8c00);box-shadow:0 0 60px 20px rgba(255,200,0,0.4);top:55%;left:50%;transform:translate(-50%,-50%);z-index:2;animation:sunPulse 4s ease-in-out infinite}
+    @keyframes sunPulse{0%,100%{box-shadow:0 0 60px 20px rgba(255,200,0,0.4)}50%{box-shadow:0 0 80px 30px rgba(255,150,0,0.6)}}
 
-    /* ── Page ── */
-    .page { max-width: 900px; margin: 0 auto; padding: 40px 24px; }
-    .page-title { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
-    .page-sub { font-size: 14px; color: var(--muted); margin-bottom: 32px; }
+    /* Desert ground */
+    .ground{position:absolute;bottom:0;left:0;right:0;height:38%;z-index:3}
+    .ground-main{position:absolute;inset:0;background:linear-gradient(180deg,#c4915a 0%,#a0703a 30%,#7a5228 60%,#5c3d1e 100%)}
 
-    /* ── Chat ── */
-    .chat-container { display: flex; flex-direction: column; height: calc(100vh - 180px); }
-    .chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding: 16px; background: var(--surface); border-radius: var(--radius) var(--radius) 0 0; border: 1px solid var(--border); border-bottom: none; }
-    .chat-messages::-webkit-scrollbar { width: 4px; }
-    .chat-messages::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
-    .msg { display: flex; gap: 12px; max-width: 80%; }
-    .msg.user { align-self: flex-end; flex-direction: row-reverse; }
-    .msg-avatar { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; }
-    .msg.assistant .msg-avatar { background: linear-gradient(135deg, var(--accent), var(--accent2)); }
-    .msg.user .msg-avatar { background: linear-gradient(135deg, #1a1a30, #2a2a50); border: 1px solid var(--border2); }
-    .msg-bubble { padding: 12px 16px; border-radius: 14px; font-size: 14px; line-height: 1.7; }
-    .msg.assistant .msg-bubble { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px 14px 14px 14px; }
-    .msg.user .msg-bubble { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; border-radius: 14px 4px 14px 14px; }
-    .msg-thinking { display: flex; gap: 4px; align-items: center; padding: 14px 16px; }
-    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: bounce 1s infinite; }
-    .dot:nth-child(2) { animation-delay: 0.15s; }
-    .dot:nth-child(3) { animation-delay: 0.3s; }
-    .chat-input-area { display: flex; gap: 10px; padding: 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 0 0 var(--radius) var(--radius); }
-    .chat-textarea { flex: 1; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text); font-family: var(--font); font-size: 14px; resize: none; outline: none; transition: border-color 0.2s; min-height: 44px; max-height: 120px; }
-    .chat-textarea:focus { border-color: var(--accent); }
+    /* Desert dunes */
+    .dune{position:absolute;bottom:0;border-radius:50% 50% 0 0;background:linear-gradient(180deg,#d4a574,#b8865c)}
+    .dune1{width:400px;height:120px;left:-50px}
+    .dune2{width:600px;height:160px;right:-100px;background:linear-gradient(180deg,#c49060,#a07040)}
+    .dune3{width:300px;height:90px;left:30%;background:linear-gradient(180deg,#e0b88a,#c49a6a)}
 
-    /* ── Gen box ── */
-    .gen-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px; margin-bottom: 24px; }
-    .gen-label { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
-    .gen-textarea { width: 100%; min-height: 100px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 10px; padding: 14px; color: var(--text); font-family: var(--font); font-size: 14px; resize: vertical; outline: none; transition: border-color 0.2s; line-height: 1.6; }
-    .gen-textarea:focus { border-color: var(--accent); }
-    .style-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
-    .style-pill { padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border2); background: none; color: var(--muted); cursor: pointer; font-size: 13px; font-family: var(--font); transition: all 0.2s; }
-    .style-pill.active { background: rgba(124,92,252,0.2); border-color: var(--accent); color: #a78bfa; }
-    .gen-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 20px; }
-    .cost-label { font-size: 13px; color: var(--muted); }
-    .result-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-    .result-img { width: 100%; display: block; aspect-ratio: 3/2; object-fit: cover; }
-    .result-footer { padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; }
-    .result-prompt { font-size: 12px; color: var(--muted); flex: 1; }
+    /* Road */
+    .road{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:200px;height:100%;z-index:4;background:linear-gradient(180deg,#2a2a2a 0%,#1a1a1a 100%);clip-path:polygon(30% 0%,70% 0%,100% 100%,0% 100%)}
+    .road-line{position:absolute;left:50%;transform:translateX(-50%);width:6px;background:#ffd700;animation:roadMove 0.5s linear infinite}
+    .road-line:nth-child(1){height:40px;bottom:10%;opacity:.9}
+    .road-line:nth-child(2){height:40px;bottom:35%;opacity:.7}
+    .road-line:nth-child(3){height:40px;bottom:60%;opacity:.5}
+    .road-line:nth-child(4){height:40px;bottom:80%;opacity:.3}
+    @keyframes roadMove{0%{transform:translateX(-50%) scaleY(1)}100%{transform:translateX(-50%) scaleY(1.05)}}
 
-    /* ── Video mode tabs ── */
-    .video-mode-tabs { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
-    .video-mode-tab { display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 12px; border: 1px solid var(--border2); background: var(--surface); color: var(--muted); cursor: pointer; font-size: 13px; font-family: var(--font); transition: all 0.2s; }
-    .video-mode-tab:hover { border-color: var(--accent); color: var(--text); }
-    .video-mode-tab.active { background: rgba(124,92,252,0.15); border-color: var(--accent); color: #a78bfa; }
-    .video-mode-cost { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: rgba(124,92,252,0.2); color: #a78bfa; margin-left: 4px; }
-    .upload-zone { border: 2px dashed rgba(124,92,252,0.3); border-radius: 12px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.2s; margin-bottom: 16px; }
-    .upload-zone:hover { border-color: var(--accent); background: rgba(124,92,252,0.05); }
-    .upload-zone-icon { font-size: 28px; margin-bottom: 8px; }
-    .upload-zone-text { font-size: 13px; color: var(--muted); }
-    .video-options-row { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; }
-    .video-option-group { flex: 1; min-width: 120px; }
-    .video-placeholder { aspect-ratio: 16/9; background: linear-gradient(135deg, #0d0d20, #1a0d30); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; position: relative; overflow: hidden; }
-    .video-glow { position: absolute; inset: 0; background: radial-gradient(ellipse at center, rgba(124,92,252,0.1) 0%, transparent 70%); animation: pulse 2s infinite; }
+    /* Cacti */
+    .cactus{position:absolute;bottom:38%;z-index:5}
+    .cactus svg{animation:sway 3s ease-in-out infinite}
+    @keyframes sway{0%,100%{transform:rotate(-1deg)}50%{transform:rotate(1deg)}}
 
-    /* ── Gallery ── */
-    .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px,1fr)); gap: 16px; }
-    .gallery-item { position: relative; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); cursor: pointer; }
-    .gallery-item img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; transition: transform 0.3s; }
-    .gallery-item:hover img { transform: scale(1.05); }
-    .gallery-overlay { position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.8), transparent); opacity: 0; transition: opacity 0.3s; display: flex; flex-direction: column; justify-content: flex-end; padding: 14px; }
-    .gallery-item:hover .gallery-overlay { opacity: 1; }
-    .gallery-prompt { font-size: 12px; color: white; margin-bottom: 8px; }
-    .gallery-type-badge { position: absolute; top: 10px; right: 10px; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
-    .badge-image { background: rgba(124,92,252,0.8); }
-    .badge-video { background: rgba(239,68,68,0.8); }
-    .btn-delete { padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.5); color: white; cursor: pointer; font-size: 12px; font-family: var(--font); }
-    .empty-state { text-align: center; padding: 80px 20px; color: var(--muted); }
-    .empty-icon { font-size: 48px; margin-bottom: 16px; }
+    /* Car */
+    .car-wrap{position:absolute;bottom:calc(38% - 2px);left:50%;transform:translateX(-50%);z-index:10;animation:carBounce 0.3s ease-in-out infinite}
+    @keyframes carBounce{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-2px)}}
 
-    /* ── Pricing ── */
-    .pricing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr)); gap: 20px; margin-top: 40px; }
-    .plan-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 32px; position: relative; transition: all 0.3s; }
-    .plan-card:hover { transform: translateY(-6px); box-shadow: var(--glow); }
-    .plan-card.popular { border-color: var(--accent); background: rgba(124,92,252,0.05); }
-    .popular-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); padding: 4px 16px; border-radius: 20px; font-size: 11px; font-weight: 700; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; white-space: nowrap; }
-    .plan-name { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
-    .plan-price { font-size: 36px; font-weight: 800; margin-bottom: 4px; }
-    .plan-price span { font-size: 14px; font-weight: 400; color: var(--muted); }
-    .plan-credits { font-size: 13px; color: var(--accent); margin-bottom: 24px; font-weight: 600; }
-    .plan-features { list-style: none; margin-bottom: 28px; display: flex; flex-direction: column; gap: 10px; }
-    .plan-features li { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-    .plan-features li::before { content: '✓'; color: var(--success); font-weight: 700; flex-shrink: 0; }
-    .plan-cta { width: 100%; padding: 12px; border-radius: 12px; font-family: var(--font); font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; border: none; }
-    .plan-cta.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; }
-    .plan-cta.secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border2); }
-    .plan-cta:hover { transform: translateY(-2px); }
+    /* Dust particles */
+    .dust{position:absolute;border-radius:50%;background:rgba(196,145,90,0.4);animation:dustFloat linear infinite}
+    @keyframes dustFloat{0%{transform:translateX(0) translateY(0) scale(1);opacity:.6}100%{transform:translateX(-80px) translateY(-40px) scale(0);opacity:0}}
 
-    /* ── Login ── */
-    .login-page { min-height: calc(100vh - 64px); display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
-    .login-card { width: 100%; max-width: 440px; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 40px; }
-    .login-logo { text-align: center; margin-bottom: 28px; }
-    .login-logo-icon { width: 56px; height: 56px; border-radius: 16px; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; font-size: 28px; margin: 0 auto 12px; box-shadow: var(--glow); }
-    .login-title { font-size: 22px; font-weight: 700; text-align: center; margin-bottom: 6px; }
-    .login-sub { font-size: 13px; color: var(--muted); text-align: center; margin-bottom: 28px; }
-    .input-row { display: flex; gap: 12px; }
-    .input-group { margin-bottom: 14px; flex: 1; }
-    .input-label { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; display: block; text-transform: uppercase; letter-spacing: 0.04em; }
-    .input-field { width: 100%; padding: 11px 14px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-family: var(--font); font-size: 14px; outline: none; transition: border-color 0.2s; }
-    .input-field:focus { border-color: var(--accent); }
-    .login-divider { display: flex; align-items: center; gap: 12px; margin: 16px 0; color: var(--muted); font-size: 12px; }
-    .login-divider::before, .login-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
-    .btn-demo { width: 100%; padding: 11px; border-radius: 10px; border: 1px solid var(--border2); background: rgba(255,255,255,0.04); color: var(--text); font-family: var(--font); font-size: 14px; cursor: pointer; transition: all 0.2s; }
-    .btn-demo:hover { background: rgba(255,255,255,0.08); }
-    .login-switch { text-align: center; margin-top: 16px; font-size: 13px; color: var(--muted); }
-    .login-switch a { color: #a78bfa; cursor: pointer; text-decoration: none; }
+    /* Heat shimmer */
+    .shimmer{position:absolute;bottom:36%;left:0;right:0;height:20px;z-index:6;background:linear-gradient(90deg,transparent,rgba(255,200,100,0.1),transparent,rgba(255,200,100,0.08),transparent);animation:shimmerMove 2s linear infinite}
+    @keyframes shimmerMove{0%{transform:translateX(-100%)}100%{transform:translateX(100%)} }
 
-    /* ── Profile ── */
-    .profile-header { display: flex; align-items: center; gap: 20px; padding: 32px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 24px; }
-    .profile-avatar { width: 72px; height: 72px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; font-size: 32px; flex-shrink: 0; box-shadow: var(--glow); }
-    .profile-name { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
-    .profile-email { font-size: 13px; color: var(--muted); }
-    .profile-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
-    .profile-stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; }
-    .profile-stat-num { font-size: 24px; font-weight: 800; background: linear-gradient(135deg, #a78bfa, #e879f9); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .profile-stat-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
-    .history-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; }
-    .history-type { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
-    .history-type-chat { background: rgba(124,92,252,0.2); }
-    .history-type-image { background: rgba(74,222,128,0.2); }
-    .history-type-video { background: rgba(248,113,113,0.2); }
-    .history-prompt { font-size: 13px; color: var(--text); flex: 1; }
-    .history-date { font-size: 11px; color: var(--muted); }
+    /* Hero content */
+    .hero-content{position:relative;z-index:20;max-width:780px;padding:20px}
+    .hero-badge{display:inline-flex;align-items:center;gap:8px;margin-bottom:24px;padding:7px 16px;border-radius:50px;border:1px solid rgba(124,92,252,0.4);background:rgba(124,92,252,0.12);font-size:12px;color:#c4b5fd;animation:fadeUp .6s ease both}
+    .hero-title{font-size:clamp(40px,7vw,88px);font-weight:800;line-height:1;margin-bottom:8px;animation:fadeUp .6s .1s ease both;text-shadow:0 2px 20px rgba(0,0,0,0.8)}
+    .hero-grad{background:linear-gradient(135deg,#fff9c4,#ffd700,#ff8c00,#e879f9);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .hero-sub{font-size:clamp(18px,3vw,28px);font-weight:300;color:rgba(255,255,255,0.7);margin-bottom:20px;animation:fadeUp .6s .2s ease both;text-shadow:0 1px 10px rgba(0,0,0,0.8)}
+    .hero-desc{font-size:15px;color:rgba(255,255,255,0.6);max-width:500px;margin:0 auto 32px;line-height:1.7;animation:fadeUp .6s .3s ease both;text-shadow:0 1px 6px rgba(0,0,0,0.8)}
+    .hero-btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;animation:fadeUp .6s .4s ease both}
+    .btn-lg{padding:13px 30px;font-size:15px;border-radius:13px}
+    .hero-stats{display:flex;gap:32px;margin-top:48px;animation:fadeUp .6s .5s ease both}
+    .stat{text-align:center}
+    .stat-n{font-size:26px;font-weight:800;background:linear-gradient(135deg,#ffd700,#e879f9);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .stat-l{font-size:11px;color:rgba(255,255,255,0.5);margin-top:3px}
 
-    /* ── Payment ── */
-    .pay-page { min-height: calc(100vh - 64px); display: flex; align-items: flex-start; justify-content: center; padding: 40px 24px; }
-    .pay-layout { display: grid; grid-template-columns: 1fr 340px; gap: 24px; max-width: 900px; width: 100%; }
-    .pay-card { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 32px; animation: fadeUp 0.5s ease both; }
-    .pay-title { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
-    .pay-subtitle { font-size: 13px; color: var(--muted); margin-bottom: 28px; }
-    .btn-pay { width: 100%; padding: 14px; border-radius: 12px; border: none; cursor: pointer; background: linear-gradient(135deg, #ff6b35, #f7931e); color: white; font-family: var(--font); font-size: 15px; font-weight: 700; transition: all 0.2s; box-shadow: 0 8px 24px rgba(255,107,53,0.3); display: flex; align-items: center; justify-content: center; gap: 8px; }
-    .btn-pay:hover { transform: translateY(-2px); }
-    .btn-pay:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-    .pay-summary { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 28px; position: sticky; top: 80px; }
-    .summary-plan-name { font-size: 24px; font-weight: 800; margin-bottom: 6px; background: linear-gradient(135deg, #a78bfa, #e879f9); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .summary-rows { display: flex; flex-direction: column; gap: 12px; margin: 20px 0; }
-    .summary-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
-    .summary-row .label { color: var(--muted); }
-    .summary-row .value { font-weight: 600; }
-    .summary-total { display: flex; justify-content: space-between; align-items: center; }
-    .summary-total .label { font-size: 14px; font-weight: 600; }
-    .summary-total .value { font-size: 26px; font-weight: 800; color: var(--gold); }
-    .trust-badges { display: flex; flex-direction: column; gap: 10px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
-    .trust-item { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
-    .secure-badge { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 16px; font-size: 12px; color: var(--muted); }
+    /* Upload hints */
+    .hero-hints{position:absolute;bottom:24px;left:50%;transform:translateX(-50%);display:flex;gap:10px;z-index:20;animation:fadeUp .6s .6s ease both}
+    .hint-btn{display:flex;align-items:center;gap:7px;padding:9px 16px;border-radius:11px;border:1px dashed rgba(255,200,100,0.4);background:rgba(0,0,0,0.4);color:rgba(255,220,100,0.9);font-size:12px;cursor:pointer;transition:all .2s;font-family:var(--font);backdrop-filter:blur(8px)}
+    .hint-btn:hover{background:rgba(0,0,0,0.6);border-color:rgba(255,200,100,0.7)}
 
-    /* ── Toast ── */
-    .toast { position: fixed; bottom: 24px; right: 24px; z-index: 9999; padding: 12px 20px; border-radius: 12px; font-size: 14px; font-weight: 500; animation: slideIn 0.3s ease; box-shadow: 0 8px 32px rgba(0,0,0,0.5); max-width: 300px; }
-    .toast.success { background: rgba(74,222,128,0.15); border: 1px solid rgba(74,222,128,0.3); color: var(--success); }
-    .toast.error { background: rgba(248,113,113,0.15); border: 1px solid rgba(248,113,113,0.3); color: var(--error); }
+    /* Features */
+    .feats{display:flex;gap:14px;padding:20px 20px 40px;max-width:1100px;margin:0 auto;flex-wrap:wrap}
+    .feat{flex:1;min-width:190px;padding:22px;border-radius:var(--r);background:var(--s1);border:1px solid var(--b1);transition:all .3s}
+    .feat:hover{border-color:var(--ac);transform:translateY(-4px);box-shadow:var(--glow)}
+    .feat-icon{font-size:28px;margin-bottom:10px}
+    .feat-title{font-size:14px;font-weight:600;margin-bottom:6px}
+    .feat-desc{font-size:12px;color:var(--mut);line-height:1.6}
 
-    /* ── Keyframes ── */
-    @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-    @keyframes bounce { 0%,80%,100% { transform: scale(0); } 40% { transform: scale(1); } }
-    @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
-    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .spinner { width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.2); border-top-color: white; border-radius: 50%; animation: spin 0.6s linear infinite; display: inline-block; vertical-align: middle; margin-right: 8px; }
+    /* Page */
+    .page{max-width:880px;margin:0 auto;padding:36px 20px}
+    .page-title{font-size:26px;font-weight:700;margin-bottom:6px}
+    .page-sub{font-size:13px;color:var(--mut);margin-bottom:28px}
 
-    select.input-field { appearance: none; cursor: pointer; }
-    @media (max-width: 640px) {
-      .nav-links { display: none; }
-      .hero-stats { gap: 20px; }
-      .pricing-grid { grid-template-columns: 1fr; }
-      .pay-layout { grid-template-columns: 1fr; }
-      .profile-stats { grid-template-columns: 1fr 1fr; }
-      .input-row { flex-direction: column; gap: 0; }
+    /* Chat */
+    .chat-wrap{display:flex;flex-direction:column;height:calc(100vh - 180px)}
+    .chat-msgs{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding:14px;background:var(--s1);border-radius:var(--r) var(--r) 0 0;border:1px solid var(--b1);border-bottom:none}
+    .chat-msgs::-webkit-scrollbar{width:3px}
+    .chat-msgs::-webkit-scrollbar-thumb{background:var(--b2);border-radius:3px}
+    .msg{display:flex;gap:10px;max-width:80%}
+    .msg.user{align-self:flex-end;flex-direction:row-reverse}
+    .msg-av{width:32px;height:32px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px}
+    .msg.assistant .msg-av{background:linear-gradient(135deg,var(--ac),var(--ac2))}
+    .msg.user .msg-av{background:var(--s2);border:1px solid var(--b2)}
+    .msg-bub{padding:10px 14px;border-radius:13px;font-size:13px;line-height:1.7}
+    .msg.assistant .msg-bub{background:var(--s2);border:1px solid var(--b1);border-radius:4px 13px 13px 13px}
+    .msg.user .msg-bub{background:linear-gradient(135deg,var(--ac),var(--ac2));color:#fff;border-radius:13px 4px 13px 13px}
+    .dots{display:flex;gap:4px;align-items:center;padding:12px 14px}
+    .dot{width:5px;height:5px;border-radius:50%;background:var(--ac);animation:bounce 1s infinite}
+    .dot:nth-child(2){animation-delay:.15s}.dot:nth-child(3){animation-delay:.3s}
+    .chat-in{display:flex;gap:8px;padding:12px;background:var(--s2);border:1px solid var(--b1);border-radius:0 0 var(--r) var(--r)}
+    .chat-ta{flex:1;background:rgba(255,255,255,0.04);border:1px solid var(--b1);border-radius:9px;padding:9px 12px;color:var(--txt);font-family:var(--font);font-size:13px;resize:none;outline:none;transition:border-color .2s;min-height:40px;max-height:110px}
+    .chat-ta:focus{border-color:var(--ac)}
+
+    /* Gen box */
+    .gen{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:24px;margin-bottom:20px}
+    .gen-lbl{font-size:11px;font-weight:600;color:var(--mut);margin-bottom:7px;text-transform:uppercase;letter-spacing:.05em}
+    .gen-ta{width:100%;min-height:90px;background:rgba(255,255,255,0.04);border:1px solid var(--b1);border-radius:9px;padding:12px;color:var(--txt);font-family:var(--font);font-size:13px;resize:vertical;outline:none;transition:border-color .2s;line-height:1.6}
+    .gen-ta:focus{border-color:var(--ac)}
+    .pills{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px}
+    .pill{padding:5px 12px;border-radius:18px;border:1px solid var(--b2);background:none;color:var(--mut);cursor:pointer;font-size:12px;font-family:var(--font);transition:all .2s}
+    .pill.on{background:rgba(124,92,252,0.2);border-color:var(--ac);color:#a78bfa}
+    .gen-foot{display:flex;align-items:center;justify-content:space-between;margin-top:18px}
+    .cost-lbl{font-size:12px;color:var(--mut)}
+    .res-box{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);overflow:hidden}
+    .res-img{width:100%;display:block;aspect-ratio:3/2;object-fit:cover}
+    .res-foot{padding:12px 16px;display:flex;align-items:center;justify-content:space-between}
+    .res-prompt{font-size:11px;color:var(--mut);flex:1}
+    .vid-ph{aspect-ratio:16/9;background:linear-gradient(135deg,#0d0d20,#1a0d30);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;position:relative;overflow:hidden}
+    .vid-glow{position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(124,92,252,0.1),transparent 70%);animation:pulse 2s infinite}
+
+    /* Upload zone */
+    .upload-z{border:2px dashed rgba(124,92,252,0.3);border-radius:11px;padding:18px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:14px}
+    .upload-z:hover{border-color:var(--ac);background:rgba(124,92,252,0.05)}
+
+    /* Video mode tabs */
+    .vmodes{display:flex;gap:7px;margin-bottom:20px;flex-wrap:wrap}
+    .vmode{display:flex;align-items:center;gap:7px;padding:9px 15px;border-radius:11px;border:1px solid var(--b2);background:var(--s1);color:var(--mut);cursor:pointer;font-size:12px;font-family:var(--font);transition:all .2s}
+    .vmode:hover{border-color:var(--ac);color:var(--txt)}
+    .vmode.on{background:rgba(124,92,252,0.15);border-color:var(--ac);color:#a78bfa}
+    .vcost{font-size:10px;padding:2px 6px;border-radius:8px;background:rgba(124,92,252,0.2);color:#a78bfa}
+    .vopts{display:flex;gap:14px;flex-wrap:wrap;margin-top:14px}
+    .vopt{flex:1;min-width:110px}
+
+    /* Gallery */
+    .gal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+    .gal-item{position:relative;border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);cursor:pointer}
+    .gal-item img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;transition:transform .3s}
+    .gal-item:hover img{transform:scale(1.05)}
+    .gal-over{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,0.8),transparent);opacity:0;transition:opacity .3s;display:flex;flex-direction:column;justify-content:flex-end;padding:12px}
+    .gal-item:hover .gal-over{opacity:1}
+    .gal-badge{position:absolute;top:8px;right:8px;padding:3px 7px;border-radius:5px;font-size:10px;font-weight:600}
+    .b-img{background:rgba(124,92,252,0.8)}.b-vid{background:rgba(239,68,68,0.8)}
+    .btn-del{padding:4px 10px;border-radius:5px;border:1px solid rgba(255,255,255,0.2);background:rgba(0,0,0,0.5);color:#fff;cursor:pointer;font-size:11px;font-family:var(--font);margin-top:6px}
+    .empty{text-align:center;padding:60px 20px;color:var(--mut)}
+
+    /* Pricing */
+    .price-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;margin-top:36px}
+    .plan{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:28px;position:relative;transition:all .3s}
+    .plan:hover{transform:translateY(-5px);box-shadow:var(--glow)}
+    .plan.hot{border-color:var(--ac);background:rgba(124,92,252,0.05)}
+    .hot-badge{position:absolute;top:-11px;left:50%;transform:translateX(-50%);padding:4px 14px;border-radius:18px;font-size:10px;font-weight:700;background:linear-gradient(135deg,var(--ac),var(--ac2));color:#fff;white-space:nowrap}
+    .plan-name{font-size:17px;font-weight:700;margin-bottom:7px}
+    .plan-price{font-size:34px;font-weight:800;margin-bottom:4px}
+    .plan-price span{font-size:13px;font-weight:400;color:var(--mut)}
+    .plan-creds{font-size:12px;color:var(--ac);margin-bottom:20px;font-weight:600}
+    .plan-feats{list-style:none;margin-bottom:24px;display:flex;flex-direction:column;gap:8px}
+    .plan-feats li{font-size:12px;color:var(--mut);display:flex;align-items:center;gap:7px}
+    .plan-feats li::before{content:'✓';color:var(--ok);font-weight:700;flex-shrink:0}
+    .plan-cta{width:100%;padding:11px;border-radius:11px;font-family:var(--font);font-size:13px;font-weight:600;cursor:pointer;transition:all .2s;border:none}
+    .plan-cta.pr{background:linear-gradient(135deg,var(--ac),var(--ac2));color:#fff}
+    .plan-cta.se{background:var(--s2);color:var(--txt);border:1px solid var(--b2)}
+    .plan-cta:hover{transform:translateY(-2px)}
+
+    /* Login */
+    .login-pg{min-height:calc(100vh - 60px);display:flex;align-items:center;justify-content:center;padding:36px 20px}
+    .login-card{width:100%;max-width:420px;background:var(--s1);border:1px solid var(--b1);border-radius:20px;padding:36px}
+    .login-logo{text-align:center;margin-bottom:24px}
+    .login-ico{width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,var(--ac),var(--ac2));display:flex;align-items:center;justify-content:center;font-size:26px;margin:0 auto 10px;box-shadow:var(--glow)}
+    .login-title{font-size:20px;font-weight:700;text-align:center;margin-bottom:5px}
+    .login-sub{font-size:12px;color:var(--mut);text-align:center;margin-bottom:24px}
+    .in-row{display:flex;gap:10px}
+    .in-g{margin-bottom:12px;flex:1}
+    .in-lbl{font-size:11px;font-weight:600;color:var(--mut);margin-bottom:5px;display:block;text-transform:uppercase;letter-spacing:.04em}
+    .in-f{width:100%;padding:10px 12px;background:rgba(255,255,255,0.04);border:1px solid var(--b1);border-radius:9px;color:var(--txt);font-family:var(--font);font-size:13px;outline:none;transition:border-color .2s}
+    .in-f:focus{border-color:var(--ac)}
+    .div-or{display:flex;align-items:center;gap:10px;margin:14px 0;color:var(--mut);font-size:11px}
+    .div-or::before,.div-or::after{content:'';flex:1;height:1px;background:var(--b1)}
+    .btn-demo{width:100%;padding:10px;border-radius:9px;border:1px solid var(--b2);background:rgba(255,255,255,0.04);color:var(--txt);font-family:var(--font);font-size:13px;cursor:pointer;transition:all .2s}
+    .btn-demo:hover{background:rgba(255,255,255,0.08)}
+    .login-sw{text-align:center;margin-top:14px;font-size:12px;color:var(--mut)}
+    .login-sw a{color:#a78bfa;cursor:pointer}
+
+    /* Profile */
+    .prof-head{display:flex;align-items:center;gap:18px;padding:28px;background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);margin-bottom:20px}
+    .prof-av{width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,var(--ac),var(--ac2));display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;box-shadow:var(--glow)}
+    .prof-name{font-size:20px;font-weight:700;margin-bottom:3px}
+    .prof-email{font-size:12px;color:var(--mut)}
+    .prof-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px}
+    .ps{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:18px;text-align:center}
+    .ps-n{font-size:22px;font-weight:800;background:linear-gradient(135deg,#a78bfa,#e879f9);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .ps-l{font-size:11px;color:var(--mut);margin-top:3px}
+    .hist-item{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--s1);border:1px solid var(--b1);border-radius:9px;margin-bottom:7px}
+    .hist-ico{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+    .h-chat{background:rgba(124,92,252,0.2)}.h-img{background:rgba(74,222,128,0.2)}.h-vid{background:rgba(248,113,113,0.2)}
+
+    /* Payment */
+    .pay-pg{min-height:calc(100vh - 60px);display:flex;align-items:flex-start;justify-content:center;padding:36px 20px}
+    .pay-lay{display:grid;grid-template-columns:1fr 320px;gap:20px;max-width:860px;width:100%}
+    .pay-card{background:var(--s1);border:1px solid var(--b1);border-radius:20px;padding:28px;animation:fadeUp .5s ease both}
+    .pay-title{font-size:20px;font-weight:700;margin-bottom:5px}
+    .pay-sub{font-size:12px;color:var(--mut);margin-bottom:24px}
+    .btn-youcan{width:100%;padding:13px;border-radius:11px;border:none;cursor:pointer;background:linear-gradient(135deg,#ff6b35,#f7931e);color:#fff;font-family:var(--font);font-size:14px;font-weight:700;transition:all .2s;box-shadow:0 8px 24px rgba(255,107,53,0.3);display:flex;align-items:center;justify-content:center;gap:8px}
+    .btn-youcan:hover{transform:translateY(-2px)}
+    .btn-youcan:disabled{opacity:.6;cursor:not-allowed;transform:none}
+    .pay-sum{background:var(--s1);border:1px solid var(--b1);border-radius:20px;padding:24px;position:sticky;top:76px}
+    .sum-plan{font-size:22px;font-weight:800;margin-bottom:5px;background:linear-gradient(135deg,#a78bfa,#e879f9);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .sum-rows{display:flex;flex-direction:column;gap:10px;margin:16px 0}
+    .sum-row{display:flex;justify-content:space-between;font-size:12px}
+    .sum-row .lbl{color:var(--mut)}.sum-row .val{font-weight:600}
+    .sum-total{display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding-top:14px;border-top:1px solid var(--b1)}
+    .trust{display:flex;flex-direction:column;gap:8px;margin-top:20px;padding-top:16px;border-top:1px solid var(--b1)}
+    .trust-item{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--mut)}
+
+    /* Toast */
+    .toast{position:fixed;bottom:20px;right:20px;z-index:9999;padding:11px 18px;border-radius:11px;font-size:13px;font-weight:500;animation:slideIn .3s ease;box-shadow:0 8px 32px rgba(0,0,0,0.5);max-width:280px}
+    .toast.success{background:rgba(74,222,128,0.15);border:1px solid rgba(74,222,128,0.3);color:var(--ok)}
+    .toast.error{background:rgba(248,113,113,0.15);border:1px solid rgba(248,113,113,0.3);color:var(--er)}
+
+    /* Keyframes */
+    @keyframes fadeUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes bounce{0%,80%,100%{transform:scale(0)}40%{transform:scale(1)}}
+    @keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
+    @keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .spin{width:16px;height:16px;border:2px solid rgba(255,255,255,0.2);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;display:inline-block;vertical-align:middle;margin-right:6px}
+
+    @media(max-width:640px){
+      .nav-links{display:none}
+      .hero-stats{gap:18px}
+      .price-grid,.pay-lay{grid-template-columns:1fr}
+      .prof-stats{grid-template-columns:1fr 1fr}
+      .in-row{flex-direction:column;gap:0}
+      .vmodes{gap:5px}
+      .vmode{padding:7px 10px;font-size:11px}
     }
   `;
 
-  // ─── Renders ──────────────────────────────────────────────────────────────────
-  const renderHero = () => (
-    <div className="hero">
-      <div className="hero-grid" />
-      <div className="hero-content">
-        <div className="hero-badge">✨ {lang === "ar" ? "مدعوم بأحدث نماذج الذكاء الاصطناعي" : lang === "fr" ? "Propulsé par les derniers modèles IA" : "Powered by the latest AI models"}</div>
-        <h1 className="hero-title"><span className="hero-title-grad">{t.hero.title}</span></h1>
-        <p className="hero-subtitle">{t.hero.subtitle}</p>
-        <p className="hero-desc">{t.hero.desc}</p>
-        <div className="hero-btns">
-          <button className="btn-primary btn-large" onClick={() => setPage(user ? "chat" : "login")}>{t.hero.cta}</button>
-          <button className="btn-ghost btn-large" onClick={() => setPage("pricing")}>{t.hero.demo}</button>
-        </div>
-        <div className="hero-stats">
-          {[["10K+", lang === "ar" ? "مستخدم" : lang === "fr" ? "Utilisateurs" : "Users"],
-            ["1M+", lang === "ar" ? "صورة مولّدة" : lang === "fr" ? "Images générées" : "Images generated"],
-            ["99%", lang === "ar" ? "رضا العملاء" : lang === "fr" ? "Satisfaction" : "Satisfaction"]
-          ].map(([n, l]) => <div className="stat" key={n}><div className="stat-num">{n}</div><div className="stat-label">{l}</div></div>)}
-        </div>
-      </div>
-      {/* Upload hint badges */}
-      <div className="hero-upload-hint">
-        <button className="upload-hint-btn" onClick={() => { setPage(user ? "images" : "login"); }}>
-          🖼️ {lang === "ar" ? "أضف صورة" : lang === "fr" ? "Ajouter une image" : "Add Image"}
-        </button>
-        <button className="upload-hint-btn" onClick={() => { setPage(user ? "video" : "login"); }}>
-          🎬 {lang === "ar" ? "أضف فيديو" : lang === "fr" ? "Ajouter une vidéo" : "Add Video"}
-        </button>
-      </div>
-      <div className="features" style={{ marginTop: 100 }}>
-        {[["🗣️", t.nav.chat, lang === "ar" ? "محادثات ذكية مدعومة بـ Claude AI" : lang === "fr" ? "Conversations intelligentes avec Claude AI" : "Smart conversations powered by Claude AI"],
-          ["🎨", t.nav.images, lang === "ar" ? "صور احترافية بالذكاء الاصطناعي" : lang === "fr" ? "Images professionnelles par IA" : "Professional AI-generated images"],
-          ["🎬", t.nav.video, lang === "ar" ? "4 أوضاع لتوليد الفيديو" : lang === "fr" ? "4 modes de génération vidéo" : "4 video generation modes"],
-          ["💎", lang === "ar" ? "رصيد مرن" : lang === "fr" ? "Crédits flexibles" : "Flexible Credits", lang === "ar" ? "نظام رصيد يناسب كل الاحتياجات" : lang === "fr" ? "Système de crédits adapté à tous" : "Credit system for all needs"],
-        ].map(([icon, title, desc]) => (
-          <div className="feature-card" key={title}><div className="feature-icon">{icon}</div><div className="feature-title">{title}</div><div className="feature-desc">{desc}</div></div>
-        ))}
-      </div>
-    </div>
-  );
-
-  const renderChat = () => (
-    <div className="page">
-      <h1 className="page-title">💬 {t.chat.title}</h1>
-      <div className="chat-container">
-        <div className="chat-messages">
-          {chatMessages.map((m, i) => (
-            <div key={i} className={`msg ${m.role}`}>
-              <div className="msg-avatar">{m.role === "assistant" ? "🤖" : "👤"}</div>
-              <div className="msg-bubble" style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
-            </div>
-          ))}
-          {chatLoading && <div className="msg assistant"><div className="msg-avatar">🤖</div><div className="msg-bubble msg-thinking"><div className="dot" /><div className="dot" /><div className="dot" /></div></div>}
-          <div ref={chatEndRef} />
-        </div>
-        <div className="chat-input-area">
-          <textarea className="chat-textarea" placeholder={t.chat.placeholder} value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }} rows={1} />
-          <button className="btn-primary" onClick={sendChat} disabled={chatLoading || !chatInput.trim()}>{chatLoading ? <span className="spinner" /> : "↑"} {t.chat.send}</button>
-          <button className="btn-ghost" onClick={() => setChatMessages([{ role: "assistant", content: t.chat.welcome }])}>{t.chat.clear}</button>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderImages = () => (
-    <div className="page">
-      <h1 className="page-title">🎨 {t.image.title}</h1>
-      <p className="page-sub">{t.image.cost}</p>
-      <div className="gen-box">
-        <div className="gen-label">{lang === "ar" ? "وصف الصورة" : lang === "fr" ? "Description" : "Prompt"}</div>
-        <textarea className="gen-textarea" placeholder={t.image.placeholder} value={imagePrompt} onChange={e => setImagePrompt(e.target.value)} />
-        <div style={{ marginTop: 16 }}>
-          <div className="gen-label">{t.image.style}</div>
-          <div className="style-pills">
-            {Object.entries(t.image.styles).map(([k, v]) => (
-              <button key={k} className={`style-pill ${imageStyle === k ? "active" : ""}`} onClick={() => setImageStyle(k)}>{v}</button>
-            ))}
-          </div>
-        </div>
-        {/* Reference image upload */}
-        <div style={{ marginTop: 16 }}>
-          <div className="upload-zone" onClick={() => imageFileRef.current?.click()}>
-            <div className="upload-zone-icon">🖼️</div>
-            <div className="upload-zone-text">{imageFile ? `✅ ${imageFile.name}` : t.image.uploadLabel}</div>
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>{t.image.uploadHint}</div>
-          </div>
-          <input ref={imageFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => setImageFile(e.target.files[0])} />
-        </div>
-        <div className="gen-footer">
-          <span className="cost-label">💰 {t.image.cost} | {t.credits}: {credits}</span>
-          <button className="btn-primary" onClick={generateImage} disabled={imageLoading || !imagePrompt.trim()}>
-            {imageLoading ? <><span className="spinner" />{t.image.generating}</> : t.image.generate}
-          </button>
-        </div>
-      </div>
-      {generatedImage && (
-        <div className="result-box">
-          <img src={generatedImage} alt="generated" className="result-img" />
-          <div className="result-footer">
-            <span className="result-prompt">✨ {imagePrompt}</span>
-            <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => { navigator.clipboard.writeText(imagePrompt); showToast(t.toast.copied); }}>
-              {lang === "ar" ? "نسخ" : lang === "fr" ? "Copier" : "Copy"}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  const renderVideo = () => {
-    const modeCosts = { text2video: 50, img2video: 60, effects: 40, lipsync: 70 };
-    const cost = modeCosts[videoMode];
+  // ── Desert Hero ──────────────────────────────────────────────────────────────
+  const renderHero = () => {
+    const starList = Array.from({length:30},(_,i)=>({
+      left:`${Math.random()*100}%`, top:`${Math.random()*100}%`,
+      size:`${Math.random()*2+1}px`, delay:`${Math.random()*3}s`, dur:`${2+Math.random()*2}s`
+    }));
+    const dustList = Array.from({length:8},(_,i)=>({
+      right:`${15+i*8}%`, bottom:`${39+Math.random()*3}%`,
+      size:`${4+Math.random()*8}px`, delay:`${i*0.3}s`, dur:`${1.5+Math.random()}s`
+    }));
     return (
-      <div className="page">
-        <h1 className="page-title">🎬 {t.video.title}</h1>
-        {/* Mode tabs */}
-        <div className="video-mode-tabs">
-          {Object.entries(t.video.modes).map(([key, label]) => (
-            <button key={key} className={`video-mode-tab ${videoMode === key ? "active" : ""}`} onClick={() => { setVideoMode(key); setVideoPrompt(""); setVideoFile(null); }}>
-              <span>{VIDEO_MODES[key].icon}</span>
-              <span>{label}</span>
-              <span className="video-mode-cost">{VIDEO_MODES[key][`cost${lang === "ar" ? "Ar" : lang === "fr" ? "Fr" : "En"}`]}</span>
-            </button>
+      <div className="hero">
+        {/* Sky */}
+        <div className="sky" />
+        {/* Stars */}
+        <div className="stars">
+          {starList.map((s,i)=>(
+            <div key={i} className="star" style={{left:s.left,top:s.top,width:s.size,height:s.size,animationDelay:s.delay,animationDuration:s.dur}} />
           ))}
         </div>
-        <div className="gen-box">
-          {/* Upload zones for modes that need files */}
-          {(videoMode === "img2video") && (
-            <div style={{ marginBottom: 16 }}>
-              <div className="gen-label">{t.video.uploadImg}</div>
-              <div className="upload-zone" onClick={() => videoFileRef.current?.click()}>
-                <div className="upload-zone-icon">🖼️</div>
-                <div className="upload-zone-text">{videoFile ? `✅ ${videoFile.name}` : t.video.uploadImg}</div>
-              </div>
-              <input ref={videoFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => setVideoFile(e.target.files[0])} />
-            </div>
-          )}
-          {(videoMode === "effects") && (
-            <div style={{ marginBottom: 16 }}>
-              <div className="gen-label">{t.video.uploadVid}</div>
-              <div className="upload-zone" onClick={() => videoFileRef.current?.click()}>
-                <div className="upload-zone-icon">🎬</div>
-                <div className="upload-zone-text">{videoFile ? `✅ ${videoFile.name}` : t.video.uploadVid}</div>
-              </div>
-              <input ref={videoFileRef} type="file" accept="video/*" style={{ display: "none" }} onChange={e => setVideoFile(e.target.files[0])} />
-            </div>
-          )}
-          <div className="gen-label">{lang === "ar" ? "وصف الفيديو" : lang === "fr" ? "Description" : "Prompt"}</div>
-          <textarea className="gen-textarea" placeholder={t.video.placeholders[videoMode]} value={videoPrompt} onChange={e => setVideoPrompt(e.target.value)} />
-          {/* Options row */}
-          <div className="video-options-row">
-            <div className="video-option-group">
-              <div className="gen-label">{t.video.duration}</div>
-              <div className="style-pills">
-                {["5", "10", "15"].map(d => <button key={d} className={`style-pill ${videoDuration === d ? "active" : ""}`} onClick={() => setVideoDuration(d)}>{d}s</button>)}
-              </div>
-            </div>
-            <div className="video-option-group">
-              <div className="gen-label">{t.video.aspectRatio}</div>
-              <div className="style-pills">
-                {["16:9", "9:16", "1:1"].map(a => <button key={a} className={`style-pill ${videoAspect === a ? "active" : ""}`} onClick={() => setVideoAspect(a)}>{a}</button>)}
-              </div>
-            </div>
-            <div className="video-option-group">
-              <div className="gen-label">{t.video.resolution}</div>
-              <div className="style-pills">
-                {["480p", "720p", "1080p"].map(r => <button key={r} className={`style-pill ${videoResolution === r ? "active" : ""}`} onClick={() => setVideoResolution(r)}>{r}</button>)}
-              </div>
-            </div>
+        {/* Sun */}
+        <div className="sun" />
+        {/* Ground */}
+        <div className="ground">
+          <div className="ground-main" />
+          <div className="dune dune1" />
+          <div className="dune dune2" />
+          <div className="dune dune3" />
+        </div>
+        {/* Road */}
+        <div className="road">
+          <div className="road-line" /><div className="road-line" /><div className="road-line" /><div className="road-line" />
+        </div>
+        {/* Cacti */}
+        <div className="cactus" style={{left:'12%'}}>
+          <svg width="40" height="70" viewBox="0 0 40 70" fill="none">
+            <rect x="16" y="20" width="8" height="50" fill="#2d5a27" rx="4"/>
+            <rect x="4" y="35" width="12" height="6" fill="#2d5a27" rx="3"/>
+            <rect x="4" y="30" width="6" height="16" fill="#2d5a27" rx="3"/>
+            <rect x="24" y="40" width="12" height="6" fill="#2d5a27" rx="3"/>
+            <rect x="30" y="35" width="6" height="16" fill="#2d5a27" rx="3"/>
+          </svg>
+        </div>
+        <div className="cactus" style={{right:'10%'}}>
+          <svg width="30" height="55" viewBox="0 0 30 55" fill="none">
+            <rect x="12" y="15" width="6" height="40" fill="#2d5a27" rx="3"/>
+            <rect x="2" y="28" width="10" height="5" fill="#2d5a27" rx="2.5"/>
+            <rect x="2" y="24" width="5" height="14" fill="#2d5a27" rx="2.5"/>
+            <rect x="18" y="32" width="10" height="5" fill="#2d5a27" rx="2.5"/>
+            <rect x="23" y="28" width="5" height="14" fill="#2d5a27" rx="2.5"/>
+          </svg>
+        </div>
+        {/* Car — red convertible */}
+        <div className="car-wrap">
+          <svg width="120" height="52" viewBox="0 0 120 52" fill="none">
+            {/* Body */}
+            <path d="M8 38 Q8 28 18 28 L38 20 Q50 14 72 14 Q88 14 96 22 L108 28 Q116 30 116 38 Z" fill="#cc2200"/>
+            <path d="M8 38 Q8 28 18 28 L38 20 Q50 14 72 14 Q88 14 96 22 L108 28 Q116 30 116 38 Z" fill="url(#carShine)"/>
+            {/* Windshield area (open top) */}
+            <path d="M42 20 L60 15 L88 16 L96 22 L72 14 Q58 13 42 20Z" fill="#1a1a2e" opacity="0.6"/>
+            {/* Bottom */}
+            <rect x="10" y="36" width="100" height="10" rx="4" fill="#aa1800"/>
+            {/* Wheels */}
+            <circle cx="32" cy="44" r="10" fill="#1a1a1a"/><circle cx="32" cy="44" r="6" fill="#333"/><circle cx="32" cy="44" r="3" fill="#555"/>
+            <circle cx="88" cy="44" r="10" fill="#1a1a1a"/><circle cx="88" cy="44" r="6" fill="#333"/><circle cx="88" cy="44" r="3" fill="#555"/>
+            {/* Headlights */}
+            <ellipse cx="112" cy="33" rx="5" ry="3" fill="#fffde7" opacity="0.9"/>
+            <ellipse cx="112" cy="33" rx="3" ry="2" fill="#fff"/>
+            {/* Driver silhouette */}
+            <ellipse cx="58" cy="20" rx="8" ry="9" fill="#2a1a0a"/>
+            <ellipse cx="58" cy="14" rx="6" ry="6" fill="#3d2b1a"/>
+            {/* Shine */}
+            <defs>
+              <linearGradient id="carShine" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="rgba(255,255,255,0.25)"/>
+                <stop offset="100%" stopColor="rgba(0,0,0,0)"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        {/* Dust particles */}
+        {dustList.map((d,i)=>(
+          <div key={i} className="dust" style={{right:d.right,bottom:d.bottom,width:d.size,height:d.size,animationDelay:d.delay,animationDuration:d.dur}} />
+        ))}
+        {/* Heat shimmer */}
+        <div className="shimmer" />
+        {/* Content */}
+        <div className="hero-content">
+          <div className="hero-badge">✨ {lang==="ar"?"مدعوم بأحدث نماذج الذكاء الاصطناعي":lang==="fr"?"Propulsé par les derniers modèles IA":"Powered by the latest AI models"}</div>
+          <h1 className="hero-title"><span className="hero-grad">{t.hero.title}</span></h1>
+          <p className="hero-sub">{t.hero.sub}</p>
+          <p className="hero-desc">{t.hero.desc}</p>
+          <div className="hero-btns">
+            <button className="btn-p btn-lg" onClick={()=>setPage(user?"chat":"login")}>{t.hero.cta}</button>
+            <button className="btn-g btn-lg" onClick={()=>setPage("pricing")}>{t.hero.pricing}</button>
           </div>
-          <div className="gen-footer">
-            <span className="cost-label">💰 {cost} {lang === "ar" ? "رصيد" : "credits"} | {t.credits}: {credits}</span>
-            <button className="btn-primary" onClick={generateVideo} disabled={videoLoading || !videoPrompt.trim()}>
-              {videoLoading ? <><span className="spinner" />{t.video.generating}</> : t.video.generate}
-            </button>
+          <div className="hero-stats">
+            {[["10K+",lang==="ar"?"مستخدم":lang==="fr"?"Utilisateurs":"Users"],
+              ["1M+",lang==="ar"?"صورة":lang==="fr"?"Images":"Images"],
+              ["99%",lang==="ar"?"رضا":"Satisfaction":"Satisfaction"]
+            ].map(([n,l])=><div className="stat" key={n}><div className="stat-n">{n}</div><div className="stat-l">{l}</div></div>)}
           </div>
         </div>
-        {generatedVideo && (
-          <div className="result-box">
-            <div className="video-placeholder">
-              <div className="video-glow" />
-              <div style={{ fontSize: 48, zIndex: 1 }}>▶️</div>
-              <div style={{ fontSize: 14, color: "var(--muted)", zIndex: 1, textAlign: "center", padding: "0 20px" }}>
-                {lang === "ar" ? "تم توليد الفيديو بنجاح!" : lang === "fr" ? "Vidéo générée!" : "Video generated!"}
-              </div>
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", zIndex: 1 }}>{videoAspect} · {videoResolution} · {videoDuration}s</div>
-            </div>
-            <div className="result-footer">
-              <span className="result-prompt">🎬 {videoPrompt}</span>
-              <span style={{ fontSize: 11, color: "var(--muted)" }}>{t.video.modes[generatedVideo.mode]}</span>
-            </div>
-          </div>
-        )}
+        {/* Upload hints */}
+        <div className="hero-hints">
+          <button className="hint-btn" onClick={()=>setPage(user?"images":"login")}>🖼️ {lang==="ar"?"أضف صورة":lang==="fr"?"Ajouter image":"Add Image"}</button>
+          <button className="hint-btn" onClick={()=>setPage(user?"video":"login")}>🎬 {lang==="ar"?"أضف فيديو":lang==="fr"?"Ajouter vidéo":"Add Video"}</button>
+        </div>
+        {/* Features */}
+        <div className="feats" style={{marginTop:100}}>
+          {[["🗣️",t.nav.chat,lang==="ar"?"محادثات Claude AI الذكية":lang==="fr"?"Chat intelligent Claude AI":"Smart Claude AI conversations"],
+            ["🎨",t.nav.images,lang==="ar"?"صور احترافية بالذكاء الاصطناعي":lang==="fr"?"Images IA professionnelles":"Professional AI images"],
+            ["🎬",t.nav.video,lang==="ar"?"4 أوضاع لتوليد الفيديو":lang==="fr"?"4 modes de génération vidéo":"4 video generation modes"],
+            ["💎",lang==="ar"?"رصيد مرن":lang==="fr"?"Crédits flexibles":"Flexible Credits",lang==="ar"?"ابدأ مجاناً بـ 50 رصيد":lang==="fr"?"Commencez avec 50 crédits":"Start free with 50 credits"],
+          ].map(([icon,title,desc])=>(
+            <div className="feat" key={title}><div className="feat-icon">{icon}</div><div className="feat-title">{title}</div><div className="feat-desc">{desc}</div></div>
+          ))}
+        </div>
       </div>
     );
   };
 
+  // ── Chat ────────────────────────────────────────────────────────────────────
+  const renderChat = () => (
+    <div className="page">
+      <h1 className="page-title">💬 {t.chat.title}</h1>
+      <div className="chat-wrap">
+        <div className="chat-msgs">
+          {msgs.map((m,i)=>(
+            <div key={i} className={`msg ${m.role}`}>
+              <div className="msg-av">{m.role==="assistant"?"🤖":"👤"}</div>
+              <div className="msg-bub" style={{whiteSpace:"pre-wrap"}}>{m.content}</div>
+            </div>
+          ))}
+          {chatLoad&&<div className="msg assistant"><div className="msg-av">🤖</div><div className="msg-bub dots"><div className="dot"/><div className="dot"/><div className="dot"/></div></div>}
+          <div ref={chatEnd}/>
+        </div>
+        <div className="chat-in">
+          <textarea className="chat-ta" placeholder={t.chat.ph} value={chatIn} onChange={e=>setChatIn(e.target.value)}
+            onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendChat()}}} rows={1}/>
+          <button className="btn-p" onClick={sendChat} disabled={chatLoad||!chatIn.trim()}>{chatLoad?<span className="spin"/>:null}{t.chat.send}</button>
+          <button className="btn-g" onClick={()=>setMsgs([{role:"assistant",content:t.chat.welcome}])}>{t.chat.clear}</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Images ──────────────────────────────────────────────────────────────────
+  const renderImages = () => (
+    <div className="page">
+      <h1 className="page-title">🎨 {t.image.title}</h1>
+      <p className="page-sub">💰 {t.image.cost} | {t.credits}: {credits}</p>
+      <div className="gen">
+        <div className="gen-lbl">{lang==="ar"?"وصف الصورة":lang==="fr"?"Description":"Prompt"}</div>
+        <textarea className="gen-ta" placeholder={t.image.ph} value={imgPrompt} onChange={e=>setImgPrompt(e.target.value)}/>
+        <div style={{marginTop:14}}>
+          <div className="gen-lbl">{t.image.style}</div>
+          <div className="pills">{Object.entries(t.image.styles).map(([k,v])=>(
+            <button key={k} className={`pill ${imgStyle===k?"on":""}`} onClick={()=>setImgStyle(k)}>{v}</button>
+          ))}</div>
+        </div>
+        <div className="upload-z" onClick={()=>{}}>
+          <div style={{fontSize:22,marginBottom:5}}>🖼️</div>
+          <div style={{fontSize:12,color:"var(--mut)"}}>{t.image.upload}</div>
+        </div>
+        <div className="gen-foot">
+          <span className="cost-lbl">💰 {t.image.cost} | {t.credits}: {credits}</span>
+          <button className="btn-p" onClick={genImage} disabled={imgLoad||!imgPrompt.trim()}>
+            {imgLoad?<><span className="spin"/>{t.image.loading}</>:t.image.gen}
+          </button>
+        </div>
+      </div>
+      {imgResult&&<div className="res-box">
+        <img src={imgResult} alt="result" className="res-img"/>
+        <div className="res-foot">
+          <span className="res-prompt">✨ {imgPrompt}</span>
+          <button className="btn-g" style={{fontSize:11}} onClick={()=>{navigator.clipboard.writeText(imgPrompt);toast_(t.copied)}}>
+            {lang==="ar"?"نسخ":lang==="fr"?"Copier":"Copy"}
+          </button>
+        </div>
+      </div>}
+    </div>
+  );
+
+  // ── Video ───────────────────────────────────────────────────────────────────
+  const renderVideo = () => {
+    const modeCosts = {text2video:50,img2video:60,effects:40,lipsync:70};
+    return (
+      <div className="page">
+        <h1 className="page-title">🎬 {t.video.title}</h1>
+        <div className="vmodes">
+          {Object.entries(t.video.modes).map(([k,v])=>(
+            <button key={k} className={`vmode ${vidMode===k?"on":""}`} onClick={()=>{setVidMode(k);setVidPrompt("")}}>
+              <span>{v}</span><span className="vcost">{modeCosts[k]}</span>
+            </button>
+          ))}
+        </div>
+        <div className="gen">
+          {(vidMode==="img2video")&&<div className="upload-z"><div style={{fontSize:22,marginBottom:5}}>🖼️</div><div style={{fontSize:12,color:"var(--mut)"}}>{t.video.uploadImg}</div></div>}
+          {(vidMode==="effects")&&<div className="upload-z"><div style={{fontSize:22,marginBottom:5}}>🎬</div><div style={{fontSize:12,color:"var(--mut)"}}>{t.video.uploadVid}</div></div>}
+          <div className="gen-lbl">{lang==="ar"?"وصف الفيديو":lang==="fr"?"Description":"Prompt"}</div>
+          <textarea className="gen-ta" placeholder={t.video.phs[vidMode]} value={vidPrompt} onChange={e=>setVidPrompt(e.target.value)}/>
+          <div className="vopts">
+            <div className="vopt"><div className="gen-lbl">{t.video.dur}</div><div className="pills">{["5","10","15"].map(d=><button key={d} className={`pill ${vidDur===d?"on":""}`} onClick={()=>setVidDur(d)}>{d}s</button>)}</div></div>
+            <div className="vopt"><div className="gen-lbl">{t.video.ratio}</div><div className="pills">{["16:9","9:16","1:1"].map(a=><button key={a} className={`pill ${vidAspect===a?"on":""}`} onClick={()=>setVidAspect(a)}>{a}</button>)}</div></div>
+            <div className="vopt"><div className="gen-lbl">{t.video.res}</div><div className="pills">{["480p","720p","1080p"].map(r=><button key={r} className={`pill ${vidRes===r?"on":""}`} onClick={()=>setVidRes(r)}>{r}</button>)}</div></div>
+          </div>
+          <div className="gen-foot">
+            <span className="cost-lbl">💰 {modeCosts[vidMode]} {lang==="ar"?"رصيد":"credits"} | {t.credits}: {credits}</span>
+            <button className="btn-p" onClick={genVideo} disabled={vidLoad||!vidPrompt.trim()}>
+              {vidLoad?<><span className="spin"/>{t.video.loading}</>:t.video.gen}
+            </button>
+          </div>
+        </div>
+        {vidResult&&<div className="res-box">
+          <div className="vid-ph"><div className="vid-glow"/><div style={{fontSize:44,zIndex:1}}>▶️</div><div style={{fontSize:13,color:"var(--mut)",zIndex:1,textAlign:"center",padding:"0 16px"}}>{lang==="ar"?"تم التوليد!":lang==="fr"?"Vidéo générée!":"Generated!"}</div><div style={{fontSize:10,color:"rgba(255,255,255,0.3)",zIndex:1}}>{vidAspect} · {vidRes} · {vidDur}s</div></div>
+          <div className="res-foot"><span className="res-prompt">🎬 {vidResult.prompt}</span><span style={{fontSize:10,color:"var(--mut)"}}>{t.video.modes[vidResult.mode]}</span></div>
+        </div>}
+      </div>
+    );
+  };
+
+  // ── Gallery ─────────────────────────────────────────────────────────────────
   const renderGallery = () => (
     <div className="page">
       <h1 className="page-title">🖼️ {t.gallery.title}</h1>
-      {gallery.length === 0 ? (
-        <div className="empty-state"><div className="empty-icon">🎨</div><p>{t.gallery.empty}</p></div>
-      ) : (
-        <div className="gallery-grid">
-          {gallery.map(item => (
-            <div key={item.id} className="gallery-item">
-              <img src={item.url} alt={item.prompt} />
-              <div className={`gallery-type-badge ${item.type === "image" ? "badge-image" : "badge-video"}`}>{item.type === "image" ? "🖼" : "🎬"}</div>
-              <div className="gallery-overlay">
-                <div className="gallery-prompt">{item.prompt}</div>
-                <button className="btn-delete" onClick={() => setGallery(g => g.filter(x => x.id !== item.id))}>{t.gallery.delete}</button>
+      {gallery.length===0?<div className="empty"><div style={{fontSize:44,marginBottom:14}}>🎨</div><p>{t.gallery.empty}</p></div>:(
+        <div className="gal-grid">
+          {gallery.map(item=>(
+            <div key={item.id} className="gal-item">
+              <img src={item.url} alt={item.prompt}/>
+              <div className={`gal-badge ${item.type==="image"?"b-img":"b-vid"}`}>{item.type==="image"?"🖼":"🎬"}</div>
+              <div className="gal-over">
+                <div style={{fontSize:11,color:"#fff",marginBottom:6}}>{item.prompt}</div>
+                <button className="btn-del" onClick={()=>setGallery(g=>g.filter(x=>x.id!==item.id))}>{t.gallery.del}</button>
               </div>
             </div>
           ))}
@@ -808,104 +781,127 @@ export default function App() {
     </div>
   );
 
+  // ── Pricing ─────────────────────────────────────────────────────────────────
   const renderPricing = () => (
-    <div className="page" style={{ maxWidth: 1000 }}>
-      <h1 className="page-title" style={{ textAlign: "center" }}>💎 {t.pricing.title}</h1>
-      <p className="page-sub" style={{ textAlign: "center" }}>{t.pricing.subtitle}</p>
-      <div className="pricing-grid">
-        {t.pricing.plans.map(plan => (
-          <div key={plan.id} className={`plan-card ${plan.popular ? "popular" : ""}`}>
-            {plan.popular && <div className="popular-badge">⭐ {lang === "ar" ? "الأكثر شعبية" : lang === "fr" ? "Populaire" : "Most Popular"}</div>}
+    <div className="page" style={{maxWidth:960}}>
+      <h1 className="page-title" style={{textAlign:"center"}}>💎 {t.pricing.title}</h1>
+      <p className="page-sub" style={{textAlign:"center"}}>{t.pricing.sub}</p>
+      <div className="price-grid">
+        {t.pricing.plans.map(plan=>(
+          <div key={plan.id} className={`plan ${plan.hot?"hot":""}`}>
+            {plan.hot&&<div className="hot-badge">⭐ {lang==="ar"?"الأكثر شعبية":lang==="fr"?"Populaire":"Most Popular"}</div>}
             <div className="plan-name">{plan.name}</div>
-            <div className="plan-price">{plan.price}<span> {plan.currency}</span></div>
-            <div className="plan-credits">💰 {plan.credits} {t.credits}</div>
-            <ul className="plan-features">{plan.features.map(f => <li key={f}>{f}</li>)}</ul>
-            <button className={`plan-cta ${plan.popular ? "primary" : "secondary"}`} onClick={() => openPayment(plan)}>{plan.cta}</button>
+            <div className="plan-price">{plan.price}<span> {plan.cur}</span></div>
+            <div className="plan-creds">💰 {plan.credits} {t.credits}</div>
+            <ul className="plan-feats">{plan.feats.map(f=><li key={f}>{f}</li>)}</ul>
+            <button className={`plan-cta ${plan.hot?"pr":"se"}`} onClick={()=>openPayment(plan)}>{plan.cta}</button>
           </div>
         ))}
       </div>
     </div>
   );
 
+  // ── Login ───────────────────────────────────────────────────────────────────
+  const renderLogin = () => (
+    <div className="login-pg">
+      <div className="login-card">
+        <div className="login-logo">
+          <div className="login-ico">✨</div>
+          <div className="login-title">{loginMode==="login"?t.login.title:t.login.reg}</div>
+          <div className="login-sub">{t.login.sub}</div>
+        </div>
+        {loginMode==="register"&&<>
+          <div className="in-row">
+            <div className="in-g"><label className="in-lbl">{t.login.fname}</label><input className="in-f" placeholder={t.login.fname} value={lFirst} onChange={e=>setLFirst(e.target.value)}/></div>
+            <div className="in-g"><label className="in-lbl">{t.login.lname}</label><input className="in-f" placeholder={t.login.lname} value={lLast} onChange={e=>setLLast(e.target.value)}/></div>
+          </div>
+          <div className="in-g"><label className="in-lbl">{t.login.phone}</label><input className="in-f" type="tel" placeholder="+212 6XX XXX XXX" value={lPhone} onChange={e=>setLPhone(e.target.value)}/></div>
+        </>}
+        <div className="in-g"><label className="in-lbl">{t.login.email}</label><input className="in-f" type="email" placeholder="example@email.com" value={lEmail} onChange={e=>setLEmail(e.target.value)}/></div>
+        <div className="in-g"><label className="in-lbl">{t.login.pass}</label><input className="in-f" type="password" placeholder="••••••••" value={lPass} onChange={e=>setLPass(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")loginMode==="login"?handleLogin():handleRegister()}}/></div>
+        <button className="btn-p" style={{width:"100%",padding:11,marginTop:4}} onClick={loginMode==="login"?handleLogin:handleRegister} disabled={lLoad}>
+          {lLoad?<span className="spin"/>:null}{loginMode==="login"?t.login.btn:t.login.reg}
+        </button>
+        <div className="div-or">{lang==="ar"?"أو":"ou"}</div>
+        <button className="btn-demo" onClick={handleDemo}>{t.login.demo}</button>
+        <div className="login-sw">{loginMode==="login"?t.login.noAcc:t.login.hasAcc}{" "}<a onClick={()=>setLoginMode(loginMode==="login"?"register":"login")}>{loginMode==="login"?t.login.reg:t.login.btn}</a></div>
+      </div>
+    </div>
+  );
+
+  // ── Profile ─────────────────────────────────────────────────────────────────
   const renderProfile = () => (
     <div className="page">
       <h1 className="page-title">👤 {t.profile.title}</h1>
-      <div className="profile-header">
-        <div className="profile-avatar">👤</div>
-        <div style={{ flex: 1 }}>
-          {editingName ? (
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input className="input-field" style={{ width: 200 }} value={newName} onChange={e => setNewName(e.target.value)} placeholder={user?.name} />
-              <button className="btn-primary" style={{ padding: "8px 16px", fontSize: 13 }} onClick={() => { setUser(u => ({ ...u, name: newName || u.name })); setEditingName(false); showToast(lang === "ar" ? "تم الحفظ" : "Saved"); }}>{t.profile.save}</button>
-              <button className="btn-ghost" style={{ padding: "8px 16px", fontSize: 13 }} onClick={() => setEditingName(false)}>✕</button>
+      <div className="prof-head">
+        <div className="prof-av">👤</div>
+        <div style={{flex:1}}>
+          {editName?(
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <input className="in-f" style={{width:180}} value={newName} onChange={e=>setNewName(e.target.value)} placeholder={user?.name}/>
+              <button className="btn-p" style={{padding:"7px 14px",fontSize:12}} onClick={()=>{setUser(u=>({...u,name:newName||u.name}));setEditName(false);toast_(lang==="ar"?"تم الحفظ":"Saved")}}>{t.profile.save}</button>
+              <button className="btn-g" style={{padding:"7px 12px",fontSize:12}} onClick={()=>setEditName(false)}>✕</button>
             </div>
-          ) : (
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div className="profile-name">{user?.name}</div>
-              <button className="btn-ghost" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => { setNewName(user?.name || ""); setEditingName(true); }}>✏️</button>
+          ):(
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <div className="prof-name">{user?.name}</div>
+              <button className="btn-g" style={{padding:"3px 9px",fontSize:11}} onClick={()=>{setNewName(user?.name||"");setEditName(true)}}>✏️</button>
             </div>
           )}
-          <div className="profile-email">{user?.email}</div>
-          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
-            {t.profile.joined}: {new Date().toLocaleDateString()}
-          </div>
+          <div className="prof-email">{user?.email}</div>
+          <div style={{fontSize:11,color:"var(--mut)",marginTop:3}}>{t.profile.plan}: {lang==="ar"?"المجاني":"Free"}</div>
         </div>
       </div>
-      <div className="profile-stats">
-        <div className="profile-stat"><div className="profile-stat-num">{credits}</div><div className="profile-stat-label">{t.profile.credits}</div></div>
-        <div className="profile-stat"><div className="profile-stat-num">{gallery.length}</div><div className="profile-stat-label">{lang === "ar" ? "أعمالي" : lang === "fr" ? "Créations" : "Creations"}</div></div>
-        <div className="profile-stat"><div className="profile-stat-num">{usageHistory.length}</div><div className="profile-stat-label">{lang === "ar" ? "طلبات" : lang === "fr" ? "Requêtes" : "Requests"}</div></div>
+      <div className="prof-stats">
+        <div className="ps"><div className="ps-n">{credits}</div><div className="ps-l">{t.profile.creds}</div></div>
+        <div className="ps"><div className="ps-n">{gallery.length}</div><div className="ps-l">{t.profile.works}</div></div>
+        <div className="ps"><div className="ps-n">{history.length}</div><div className="ps-l">{lang==="ar"?"طلبات":"Requests"}</div></div>
       </div>
-      <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>📋 {t.profile.history}</h2>
-      {usageHistory.length === 0 ? (
-        <div style={{ textAlign: "center", padding: 40, color: "var(--muted)" }}>{t.profile.noHistory}</div>
-      ) : (
-        usageHistory.map(h => (
-          <div key={h.id} className="history-item">
-            <div className={`history-type history-type-${h.type}`}>{h.type === "chat" ? "💬" : h.type === "image" ? "🎨" : "🎬"}</div>
-            <div className="history-prompt">{h.prompt}</div>
-            <div className="history-date">{h.date}</div>
+      <h2 style={{fontSize:15,fontWeight:700,marginBottom:14}}>📋 {t.profile.history}</h2>
+      {history.length===0?<div style={{textAlign:"center",padding:32,color:"var(--mut)"}}>{t.profile.noHistory}</div>:(
+        history.map(h=>(
+          <div key={h.id} className="hist-item">
+            <div className={`hist-ico ${h.type==="chat"?"h-chat":h.type==="image"?"h-img":"h-vid"}`}>{h.type==="chat"?"💬":h.type==="image"?"🎨":"🎬"}</div>
+            <div style={{flex:1,fontSize:12}}>{h.prompt}</div>
+            <div style={{fontSize:10,color:"var(--mut)"}}>{h.date}</div>
           </div>
         ))
       )}
     </div>
   );
 
+  // ── Payment ─────────────────────────────────────────────────────────────────
   const renderPayment = () => (
-    <div className="pay-page">
-      <div className="pay-layout">
+    <div className="pay-pg">
+      <div className="pay-lay">
         <div className="pay-card">
-          <button className="btn-ghost" style={{ marginBottom: 20, fontSize: 13 }} onClick={() => setPage("pricing")}>← {t.pay.backToPricing}</button>
+          <button className="btn-g" style={{marginBottom:18,fontSize:12}} onClick={()=>setPage("pricing")}>← {t.pay.back}</button>
           <div className="pay-title">{t.pay.title}</div>
-          <div className="pay-subtitle">{t.pay.subtitle}</div>
-          <div style={{ padding: "24px", background: "rgba(255,107,53,0.05)", borderRadius: 16, border: "1px solid rgba(255,107,53,0.2)", marginBottom: 16 }}>
-            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>🔒 YouCan Pay</div>
-            <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.7, marginBottom: 20 }}>
-              {lang === "ar" ? "سيتم تحويلك إلى بوابة الدفع الآمنة لإتمام المعاملة" : lang === "fr" ? "Vous serez redirigé vers la passerelle sécurisée" : "You will be redirected to the secure payment gateway"}
+          <div className="pay-sub">{lang==="ar"?"أنت على بُعد خطوة واحدة":lang==="fr"?"Un pas vers la créativité":"One step away from creativity"}</div>
+          <div style={{padding:20,background:"rgba(255,107,53,0.05)",borderRadius:14,border:"1px solid rgba(255,107,53,0.2)",marginBottom:14}}>
+            <div style={{fontSize:16,fontWeight:700,marginBottom:7}}>🔒 YouCan Pay</div>
+            <div style={{fontSize:12,color:"var(--mut)",lineHeight:1.7,marginBottom:18}}>
+              {lang==="ar"?"سيتم تحويلك إلى بوابة الدفع الآمنة":lang==="fr"?"Vous serez redirigé vers la passerelle sécurisée":"You will be redirected to the secure payment gateway"}
             </div>
-            <button className="btn-pay" onClick={handleYouCanRedirect} disabled={payLoading}>
-              {payLoading ? <><span className="spinner" />{t.pay.processing}</> : <>{t.pay.youcanBtn} 🚀</>}
+            <button className="btn-youcan" onClick={handlePay} disabled={payLoad}>
+              {payLoad?<span className="spin"/>:null}{t.pay.btn} 🚀
             </button>
           </div>
-          <div className="secure-badge">🔒 {t.pay.secureBadge}</div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:5,marginTop:12,fontSize:11,color:"var(--mut)"}}>🔒 {t.pay.secure}</div>
         </div>
-        <div className="pay-summary">
-          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 16 }}>{t.pay.orderSummary}</div>
-          {selectedPlan && <>
-            <div className="summary-plan-name">{selectedPlan.name}</div>
-            <div className="summary-rows">
-              <div className="summary-row"><span className="label">{t.pay.plan}</span><span className="value">{selectedPlan.name}</span></div>
-              <div className="summary-row"><span className="label">{t.pay.credits}</span><span className="value">{selectedPlan.credits}</span></div>
+        <div className="pay-sum">
+          <div style={{fontSize:12,fontWeight:700,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:14}}>{t.pay.summary}</div>
+          {selPlan&&<>
+            <div className="sum-plan">{selPlan.name}</div>
+            <div className="sum-rows">
+              <div className="sum-row"><span className="lbl">{t.pay.plan}</span><span className="val">{selPlan.name}</span></div>
+              <div className="sum-row"><span className="lbl">{t.pay.creds}</span><span className="val">{selPlan.credits}</span></div>
             </div>
-            <div style={{ height: 1, background: "var(--border)", margin: "16px 0" }} />
-            <div className="summary-total">
-              <span className="label">{t.pay.total}</span>
-              <span className="value">{selectedPlan.price} <span style={{ fontSize: 13, fontWeight: 400, color: "var(--muted)" }}>{t.pay.currency}</span></span>
-            </div>
+            <div className="sum-total"><span style={{fontSize:13,fontWeight:600}}>{t.pay.total}</span><span style={{fontSize:24,fontWeight:800,color:"var(--gold)"}}>{selPlan.price} <span style={{fontSize:12,fontWeight:400,color:"var(--mut)"}}>{t.pay.cur}</span></span></div>
           </>}
-          <div className="trust-badges">
-            {[[t.pay.guarantee, "✅"], [t.pay.support, "🎧"], [t.pay.ssl, "🔐"]].map(([label, icon]) => (
-              <div key={label} className="trust-item"><span style={{ fontSize: 16 }}>{icon}</span>{label}</div>
+          <div className="trust">
+            {[[t.pay.guarantee,"✅"],[t.pay.support,"🎧"],["SSL","🔐"]].map(([l,i])=>(
+              <div key={l} className="trust-item"><span style={{fontSize:14}}>{i}</span>{l}</div>
             ))}
           </div>
         </div>
@@ -913,97 +909,30 @@ export default function App() {
     </div>
   );
 
-  const renderLogin = () => (
-    <div className="login-page">
-      <div className="login-card">
-        <div className="login-logo">
-          <div className="login-logo-icon">✨</div>
-          <div className="login-title">{loginMode === "login" ? t.loginTitle : t.registerBtn}</div>
-          <div className="login-sub">{t.loginSub}</div>
-        </div>
-        {loginMode === "register" && (
-          <div className="input-row">
-            <div className="input-group">
-              <label className="input-label">{t.firstName}</label>
-              <input className="input-field" placeholder={t.firstName} value={loginFirst} onChange={e => setLoginFirst(e.target.value)} />
-            </div>
-            <div className="input-group">
-              <label className="input-label">{t.lastName}</label>
-              <input className="input-field" placeholder={t.lastName} value={loginLast} onChange={e => setLoginLast(e.target.value)} />
-            </div>
-          </div>
-        )}
-        {loginMode === "register" && (
-          <div className="input-group">
-            <label className="input-label">{t.phone}</label>
-            <input className="input-field" type="tel" placeholder="+212 6XX XXX XXX" value={loginPhone} onChange={e => setLoginPhone(e.target.value)} />
-          </div>
-        )}
-        <div className="input-group">
-          <label className="input-label">{t.email}</label>
-          <input className="input-field" type="email" placeholder="example@email.com" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} />
-        </div>
-        <div className="input-group">
-          <label className="input-label">{t.password}</label>
-          <input className="input-field" type="password" placeholder="••••••••" value={loginPass} onChange={e => setLoginPass(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") loginMode === "login" ? handleLogin() : handleRegister(); }} />
-        </div>
-        <button className="btn-primary" style={{ width: "100%", padding: 12, marginTop: 4 }}
-          onClick={loginMode === "login" ? handleLogin : handleRegister} disabled={loginLoading}>
-          {loginLoading ? <span className="spinner" /> : null}
-          {loginMode === "login" ? t.loginBtn : t.registerBtn}
-        </button>
-        <div className="login-divider">{lang === "ar" ? "أو" : "ou"}</div>
-        <button className="btn-demo" onClick={handleDemoLogin}>{t.demoLogin}</button>
-        <div className="login-switch">
-          {loginMode === "login" ? t.noAccount : t.hasAccount}{" "}
-          <a onClick={() => setLoginMode(loginMode === "login" ? "register" : "login")}>
-            {loginMode === "login" ? t.registerBtn : t.loginBtn}
-          </a>
-        </div>
-      </div>
-    </div>
-  );
-
-  // ─── Main render ──────────────────────────────────────────────────────────────
-  const pages = { home: renderHero, chat: renderChat, images: renderImages, video: renderVideo, gallery: renderGallery, pricing: renderPricing, payment: renderPayment, login: renderLogin, profile: renderProfile };
+  // ── Main ─────────────────────────────────────────────────────────────────────
+  const pages = { home:renderHero, chat:renderChat, images:renderImages, video:renderVideo, gallery:renderGallery, pricing:renderPricing, payment:renderPayment, login:renderLogin, profile:renderProfile };
 
   return (
     <div className="app" dir={t.dir}>
-      <style>{styles}</style>
-      {/* Animated background orbs */}
-      <div className="bg-orbs">
-        <div className="orb orb-1" />
-        <div className="orb orb-2" />
-        <div className="orb orb-3" />
-      </div>
-      {/* Navbar */}
-      <nav className="navbar">
-        <div className="nav-logo" onClick={() => setPage("home")}>
+      <style>{css}</style>
+      <nav className="nav">
+        <div className="nav-logo" onClick={()=>setPage("home")}>
           <div className="nav-logo-icon">✨</div>
-          <div className="nav-logo-text">{t.name}</div>
+          <div className="nav-logo-txt">{t.name}</div>
         </div>
         <div className="nav-links">
-          {(user ? ["chat","images","video","gallery","pricing","profile"] : ["pricing"]).map(p => (
-            <button key={p} className={`nav-link ${page === p ? "active" : ""}`} onClick={() => setPage(p)}>{t.nav[p]}</button>
+          {(user?["chat","images","video","gallery","pricing","profile"]:["pricing"]).map(p=>(
+            <button key={p} className={`nav-link ${page===p?"on":""}`} onClick={()=>setPage(p)}>{t.nav[p]}</button>
           ))}
         </div>
-        <div className="nav-right">
-          {user && <div className="credits-badge">💰 {credits}</div>}
-          {["ar","fr","en"].map(l => <button key={l} className="lang-btn" onClick={() => setLang(l)}>{l.toUpperCase()}</button>)}
-          {user ? (
-            <button className="btn-ghost" onClick={handleLogout}>{t.logout}</button>
-          ) : (
-            <button className="btn-primary" onClick={() => setPage("login")}>{t.login}</button>
-          )}
+        <div className="nav-r">
+          {user&&<div className="creds-badge">💰 {credits}</div>}
+          {["ar","fr","en"].map(l=><button key={l} className="lang-btn" onClick={()=>setLang(l)}>{l.toUpperCase()}</button>)}
+          {user?<button className="btn-g" onClick={handleLogout}>{t.logout}</button>:<button className="btn-p" onClick={()=>setPage("login")}>{t.login}</button>}
         </div>
       </nav>
-      {/* Main content */}
-      <main className="main">
-        {(pages[page] || renderHero)()}
-      </main>
-      {/* Toast */}
-      {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
+      <main className="main">{(pages[page]||renderHero)()}</main>
+      {toast&&<div className={`toast ${toast.type}`}>{toast.msg}</div>}
     </div>
   );
 }
