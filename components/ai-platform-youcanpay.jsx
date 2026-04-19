@@ -637,7 +637,7 @@ export default function App() {
           <div className="hero-stats">
             {[["10K+",lang==="ar"?"مستخدم":lang==="fr"?"Utilisateurs":"Users"],
               ["1M+",lang==="ar"?"صورة":lang==="fr"?"Images":"Images"],
-              ["99%",lang==="ar"?"رضا":"Satisfaction":"Satisfaction"]
+              ["99%",lang==="ar"?"رضا":lang==="fr"?"Satisfaction":"Satisfaction"]
             ].map(([n,l])=><div className="stat" key={n}><div className="stat-n">{n}</div><div className="stat-l">{l}</div></div>)}
           </div>
         </div>
