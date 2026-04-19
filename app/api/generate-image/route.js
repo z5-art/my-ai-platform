@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { checkAndDeductCredits, saveToGallery } from '../../lib/token-guard'
+import { checkAndDeductCredits, saveToGallery } from '@/lib/token-guard'
 
 export async function POST(req) {
   try {

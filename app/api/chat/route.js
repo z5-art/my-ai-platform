@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
-import { checkAndDeductCredits, saveChatMessage } from '../../lib/token-guard'
+import { checkAndDeductCredits, saveChatMessage } from '@/lib/token-guard'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 

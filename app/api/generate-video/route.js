@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { checkAndDeductCredits, saveToGallery } from '../../lib/token-guard'
+import { checkAndDeductCredits, saveToGallery } from '@/lib/token-guard'
 
 const COSTS = { text2video: 50, img2video: 60, effects: 40, lipsync: 70 }
 
