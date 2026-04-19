@@ -301,56 +301,10 @@ export default function App() {
     .btn-p:disabled{opacity:.5;cursor:not-allowed;transform:none}
     .main{flex:1;padding-top:60px}
 
-    /* ── HERO DESERT ANIMATION ── */
+    /* ── HERO VIDEO BACKGROUND ── */
     .hero{min-height:calc(100vh - 60px);position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:40px 20px}
-
-    /* Sky */
-    .sky{position:absolute;inset:0;background:linear-gradient(180deg,#0a0015 0%,#1a0030 30%,#2d0050 50%,#8b4513 65%,#cd853f 72%,#daa520 78%,#f4a460 85%,#e8c48a 100%);z-index:0}
-
-    /* Stars */
-    .stars{position:absolute;top:0;left:0;right:0;height:60%;z-index:1;overflow:hidden}
-    .star{position:absolute;background:#fff;border-radius:50%;animation:twinkle 3s infinite}
-    @keyframes twinkle{0%,100%{opacity:.3;transform:scale(1)}50%{opacity:1;transform:scale(1.3)}}
-
-    /* Sun/Moon */
-    .sun{position:absolute;width:80px;height:80px;border-radius:50%;background:radial-gradient(circle,#fff9c4,#ffd700,#ff8c00);box-shadow:0 0 60px 20px rgba(255,200,0,0.4);top:55%;left:50%;transform:translate(-50%,-50%);z-index:2;animation:sunPulse 4s ease-in-out infinite}
-    @keyframes sunPulse{0%,100%{box-shadow:0 0 60px 20px rgba(255,200,0,0.4)}50%{box-shadow:0 0 80px 30px rgba(255,150,0,0.6)}}
-
-    /* Desert ground */
-    .ground{position:absolute;bottom:0;left:0;right:0;height:38%;z-index:3}
-    .ground-main{position:absolute;inset:0;background:linear-gradient(180deg,#c4915a 0%,#a0703a 30%,#7a5228 60%,#5c3d1e 100%)}
-
-    /* Desert dunes */
-    .dune{position:absolute;bottom:0;border-radius:50% 50% 0 0;background:linear-gradient(180deg,#d4a574,#b8865c)}
-    .dune1{width:400px;height:120px;left:-50px}
-    .dune2{width:600px;height:160px;right:-100px;background:linear-gradient(180deg,#c49060,#a07040)}
-    .dune3{width:300px;height:90px;left:30%;background:linear-gradient(180deg,#e0b88a,#c49a6a)}
-
-    /* Road */
-    .road{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:200px;height:100%;z-index:4;background:linear-gradient(180deg,#2a2a2a 0%,#1a1a1a 100%);clip-path:polygon(30% 0%,70% 0%,100% 100%,0% 100%)}
-    .road-line{position:absolute;left:50%;transform:translateX(-50%);width:6px;background:#ffd700;animation:roadMove 0.5s linear infinite}
-    .road-line:nth-child(1){height:40px;bottom:10%;opacity:.9}
-    .road-line:nth-child(2){height:40px;bottom:35%;opacity:.7}
-    .road-line:nth-child(3){height:40px;bottom:60%;opacity:.5}
-    .road-line:nth-child(4){height:40px;bottom:80%;opacity:.3}
-    @keyframes roadMove{0%{transform:translateX(-50%) scaleY(1)}100%{transform:translateX(-50%) scaleY(1.05)}}
-
-    /* Cacti */
-    .cactus{position:absolute;bottom:38%;z-index:5}
-    .cactus svg{animation:sway 3s ease-in-out infinite}
-    @keyframes sway{0%,100%{transform:rotate(-1deg)}50%{transform:rotate(1deg)}}
-
-    /* Car */
-    .car-wrap{position:absolute;bottom:calc(38% - 2px);left:50%;transform:translateX(-50%);z-index:10;animation:carBounce 0.3s ease-in-out infinite}
-    @keyframes carBounce{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-2px)}}
-
-    /* Dust particles */
-    .dust{position:absolute;border-radius:50%;background:rgba(196,145,90,0.4);animation:dustFloat linear infinite}
-    @keyframes dustFloat{0%{transform:translateX(0) translateY(0) scale(1);opacity:.6}100%{transform:translateX(-80px) translateY(-40px) scale(0);opacity:0}}
-
-    /* Heat shimmer */
-    .shimmer{position:absolute;bottom:36%;left:0;right:0;height:20px;z-index:6;background:linear-gradient(90deg,transparent,rgba(255,200,100,0.1),transparent,rgba(255,200,100,0.08),transparent);animation:shimmerMove 2s linear infinite}
-    @keyframes shimmerMove{0%{transform:translateX(-100%)}100%{transform:translateX(100%)} }
+    .hero-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0}
+    .hero-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,0.35) 0%,rgba(0,0,0,0.55) 60%,rgba(0,0,0,0.75) 100%);z-index:1}
 
     /* Hero content */
     .hero-content{position:relative;z-index:20;max-width:780px;padding:20px}
@@ -538,92 +492,22 @@ export default function App() {
     }
   `;
 
-  // ── Desert Hero ──────────────────────────────────────────────────────────────
+  // ── Hero with Video Background ───────────────────────────────────────────────
   const renderHero = () => {
-    const starList = Array.from({length:30},(_,i)=>({
-      left:`${Math.random()*100}%`, top:`${Math.random()*100}%`,
-      size:`${Math.random()*2+1}px`, delay:`${Math.random()*3}s`, dur:`${2+Math.random()*2}s`
-    }));
-    const dustList = Array.from({length:8},(_,i)=>({
-      right:`${15+i*8}%`, bottom:`${39+Math.random()*3}%`,
-      size:`${4+Math.random()*8}px`, delay:`${i*0.3}s`, dur:`${1.5+Math.random()}s`
-    }));
     return (
       <div className="hero">
-        {/* Sky */}
-        <div className="sky" />
-        {/* Stars */}
-        <div className="stars">
-          {starList.map((s,i)=>(
-            <div key={i} className="star" style={{left:s.left,top:s.top,width:s.size,height:s.size,animationDelay:s.delay,animationDuration:s.dur}} />
-          ))}
-        </div>
-        {/* Sun */}
-        <div className="sun" />
-        {/* Ground */}
-        <div className="ground">
-          <div className="ground-main" />
-          <div className="dune dune1" />
-          <div className="dune dune2" />
-          <div className="dune dune3" />
-        </div>
-        {/* Road */}
-        <div className="road">
-          <div className="road-line" /><div className="road-line" /><div className="road-line" /><div className="road-line" />
-        </div>
-        {/* Cacti */}
-        <div className="cactus" style={{left:'12%'}}>
-          <svg width="40" height="70" viewBox="0 0 40 70" fill="none">
-            <rect x="16" y="20" width="8" height="50" fill="#2d5a27" rx="4"/>
-            <rect x="4" y="35" width="12" height="6" fill="#2d5a27" rx="3"/>
-            <rect x="4" y="30" width="6" height="16" fill="#2d5a27" rx="3"/>
-            <rect x="24" y="40" width="12" height="6" fill="#2d5a27" rx="3"/>
-            <rect x="30" y="35" width="6" height="16" fill="#2d5a27" rx="3"/>
-          </svg>
-        </div>
-        <div className="cactus" style={{right:'10%'}}>
-          <svg width="30" height="55" viewBox="0 0 30 55" fill="none">
-            <rect x="12" y="15" width="6" height="40" fill="#2d5a27" rx="3"/>
-            <rect x="2" y="28" width="10" height="5" fill="#2d5a27" rx="2.5"/>
-            <rect x="2" y="24" width="5" height="14" fill="#2d5a27" rx="2.5"/>
-            <rect x="18" y="32" width="10" height="5" fill="#2d5a27" rx="2.5"/>
-            <rect x="23" y="28" width="5" height="14" fill="#2d5a27" rx="2.5"/>
-          </svg>
-        </div>
-        {/* Car — red convertible */}
-        <div className="car-wrap">
-          <svg width="120" height="52" viewBox="0 0 120 52" fill="none">
-            {/* Body */}
-            <path d="M8 38 Q8 28 18 28 L38 20 Q50 14 72 14 Q88 14 96 22 L108 28 Q116 30 116 38 Z" fill="#cc2200"/>
-            <path d="M8 38 Q8 28 18 28 L38 20 Q50 14 72 14 Q88 14 96 22 L108 28 Q116 30 116 38 Z" fill="url(#carShine)"/>
-            {/* Windshield area (open top) */}
-            <path d="M42 20 L60 15 L88 16 L96 22 L72 14 Q58 13 42 20Z" fill="#1a1a2e" opacity="0.6"/>
-            {/* Bottom */}
-            <rect x="10" y="36" width="100" height="10" rx="4" fill="#aa1800"/>
-            {/* Wheels */}
-            <circle cx="32" cy="44" r="10" fill="#1a1a1a"/><circle cx="32" cy="44" r="6" fill="#333"/><circle cx="32" cy="44" r="3" fill="#555"/>
-            <circle cx="88" cy="44" r="10" fill="#1a1a1a"/><circle cx="88" cy="44" r="6" fill="#333"/><circle cx="88" cy="44" r="3" fill="#555"/>
-            {/* Headlights */}
-            <ellipse cx="112" cy="33" rx="5" ry="3" fill="#fffde7" opacity="0.9"/>
-            <ellipse cx="112" cy="33" rx="3" ry="2" fill="#fff"/>
-            {/* Driver silhouette */}
-            <ellipse cx="58" cy="20" rx="8" ry="9" fill="#2a1a0a"/>
-            <ellipse cx="58" cy="14" rx="6" ry="6" fill="#3d2b1a"/>
-            {/* Shine */}
-            <defs>
-              <linearGradient id="carShine" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="rgba(255,255,255,0.25)"/>
-                <stop offset="100%" stopColor="rgba(0,0,0,0)"/>
-              </linearGradient>
-            </defs>
-          </svg>
-        </div>
-        {/* Dust particles */}
-        {dustList.map((d,i)=>(
-          <div key={i} className="dust" style={{right:d.right,bottom:d.bottom,width:d.size,height:d.size,animationDelay:d.delay,animationDuration:d.dur}} />
-        ))}
-        {/* Heat shimmer */}
-        <div className="shimmer" />
+        {/* Video Background */}
+        <video
+          className="hero-video"
+          autoPlay
+          muted
+          loop
+          playsInline
+        >
+          <source src="/hero.mp4" type="video/mp4" />
+        </video>
+        {/* Dark overlay */}
+        <div className="hero-overlay" />
         {/* Content */}
         <div className="hero-content">
           <div className="hero-badge">✨ {lang==="ar"?"مدعوم بأحدث نماذج الذكاء الاصطناعي":lang==="fr"?"Propulsé par les derniers modèles IA":"Powered by the latest AI models"}</div>
